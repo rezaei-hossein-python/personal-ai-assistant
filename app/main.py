@@ -1,9 +1,12 @@
 from fastapi import FastAPI
 
+from app.config import settings
+
+
 app = FastAPI(
-    title="Personal AI Assistant API",
-    description="An AI-powered personal knowledge management system",
-    version="0.1.0"
+    title=settings.APP_NAME,
+    version=settings.APP_VERSION,
+    description="An AI-powered personal knowledge management system"
 )
 
 
@@ -11,5 +14,6 @@ app = FastAPI(
 def home():
     return {
         "message": "Personal AI Assistant API is running",
-        "version": "0.1.0"
+        "application": settings.APP_NAME,
+        "version": settings.APP_VERSION
     }
