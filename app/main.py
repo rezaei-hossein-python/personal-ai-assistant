@@ -1,13 +1,15 @@
 from fastapi import FastAPI
 
 from app.config import settings
-
+from app.routers.health import router as health_router
 
 app = FastAPI(
     title=settings.APP_NAME,
     version=settings.APP_VERSION,
     description="An AI-powered personal knowledge management system"
 )
+
+app.include_router(health_router)
 
 
 @app.get("/")
