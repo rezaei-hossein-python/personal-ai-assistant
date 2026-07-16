@@ -1,7 +1,12 @@
 from fastapi import FastAPI
 
 from app.config import settings
+from app.core.logging import logger, setup_logging
 from app.routers.health import router as health_router
+
+
+setup_logging()
+
 
 app = FastAPI(
     title=settings.APP_NAME,
@@ -14,6 +19,8 @@ app.include_router(health_router)
 
 @app.get("/")
 def home():
+    logger.info("Home endpoint accessed")
+
     return {
         "message": "Personal AI Assistant API is running",
         "application": settings.APP_NAME,
