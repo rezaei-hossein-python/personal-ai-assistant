@@ -27,7 +27,8 @@ def chat(request: ChatRequest):
     )
 
     response = ask_ai(
-        request.message
+        request.message,
+        history
     )
 
     save_message(

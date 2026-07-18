@@ -1,7 +1,6 @@
 from openai import OpenAI
 
 from app.config import settings
-from app.core.logging import logger
 
 
 client = OpenAI(
@@ -9,14 +8,28 @@ client = OpenAI(
 )
 
 
-def ask_ai(message: str):
-    logger.info("Sending request to OpenAI")
+def ask_ai(message: str, history: list):
+
+    conversation = []
+
+    for item in history:
+        conversation.append(
+            {
+                "role": item["role"],
+                "content": item["content"]
+            }
+        )
+
+    conversation.append(
+        {
+            "role": "user",
+            "content": message
+        }
+    )
 
     response = client.responses.create(
         model="gpt-4.1-mini",
-        input=message
+        input=conversation
     )
-
-    logger.info("OpenAI response received")
 
     return response.output_text
