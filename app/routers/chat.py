@@ -1,18 +1,20 @@
 from fastapi import APIRouter
 
 from app.core.logging import logger
+from app.schemas.chat import ChatRequest, ChatResponse
 from app.services.ai_service import ask_ai
 
 
 router = APIRouter()
 
 
-@router.post("/chat")
-def chat(message: str):
+@router.post("/chat", response_model=ChatResponse)
+def chat(request: ChatRequest):
+
     logger.info("Chat request received")
 
-    response = ask_ai(message)
+    response = ask_ai(request.message)
 
-    return {
-        "response": response
-    }
+    return ChatResponse(
+        response=response
+    )
