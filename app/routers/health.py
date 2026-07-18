@@ -1,6 +1,7 @@
 from fastapi import APIRouter
 
 from app.core.logging import logger
+from app.services.system_service import get_system_status
 
 
 router = APIRouter()
@@ -10,7 +11,4 @@ router = APIRouter()
 def health_check():
     logger.info("Health check requested")
 
-    return {
-        "status": "healthy",
-        "service": "Personal AI Assistant"
-    }
+    return get_system_status()
