@@ -2,6 +2,7 @@ from app.core.logging import logger
 
 from app.database.database import SessionLocal
 from app.models.message import Message
+from app.services.conversation_service import get_or_create_conversation
 
 
 def save_message(
@@ -12,6 +13,10 @@ def save_message(
 
     logger.info(
         f"Saving message for conversation {conversation_id}"
+    )
+
+    get_or_create_conversation(
+        conversation_id
     )
 
     db = SessionLocal()
@@ -54,4 +59,4 @@ def get_conversation(conversation_id: str):
             "content": message.content
         }
         for message in messages
-    ]
+    ]   
