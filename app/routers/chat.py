@@ -11,7 +11,9 @@ router = APIRouter()
 @router.post("/chat", response_model=ChatResponse)
 def chat(request: ChatRequest):
 
-    logger.info("Chat request received")
+    logger.info(
+        f"Chat request received for conversation {request.conversation_id}"
+    )
 
     response = ask_ai(request.message)
 
