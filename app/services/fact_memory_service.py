@@ -5,13 +5,13 @@ from app.models.memory import Memory
 
 def save_fact(
     db: Session,
-    conversation_id: str,
+    user_id: int,
     category: str,
     key: str,
     value: str,
 ):
     memory = Memory(
-        conversation_id=conversation_id,
+        user_id=user_id,
         category=category,
         key=key,
         value=value,
@@ -26,12 +26,12 @@ def save_fact(
 
 def get_facts(
     db: Session,
-    conversation_id: str,
+    user_id: int,
 ):
     return (
         db.query(Memory)
         .filter(
-            Memory.conversation_id == conversation_id
+            Memory.user_id == user_id
         )
         .all()
     )

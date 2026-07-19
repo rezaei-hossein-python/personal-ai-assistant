@@ -1,35 +1,28 @@
 from app.core.logging import logger
-
-from app.database.database import SessionLocal
 from app.models.conversation import Conversation
 
 
-def create_conversation(conversation_id: str):
+def create_conversation(db, conversation_id: str, user_id: int | None = None):
     logger.info(
         f"Creating conversation {conversation_id}"
     )
 
-    db = SessionLocal()
-
     conversation = Conversation(
-        conversation_id=conversation_id
+        conversation_id=conversation_id,
+        user_id=user_id,
     )
 
     db.add(conversation)
     db.commit()
     db.refresh(conversation)
 
-    db.close()
-
     return conversation
 
 
-def get_conversation(conversation_id: str):
+def get_conversation(db, conversation_id: str):
     logger.info(
         f"Getting conversation {conversation_id}"
     )
-
-    db = SessionLocal()
 
     conversation = (
         db.query(Conversation)
@@ -39,19 +32,24 @@ def get_conversation(conversation_id: str):
         .first()
     )
 
-    db.close()
-
     return conversation
 
 
-def get_or_create_conversation(conversation_id: str):
+def get_or_create_conversation(
+    db,
+    conversation_id: str,
+    user_id: int | None = None,
+):
     conversation = get_conversation(
-        conversation_id
+        db,
+        conversation_id,
     )
 
     if conversation:
         return conversation
 
     return create_conversation(
-        conversation_id
+        db,
+        conversation_id,
+        user_id,
     )

@@ -1,8 +1,10 @@
 import json
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
+from sqlalchemy.orm import Session
 
 from app.core.logging import logger
+from app.database.database import get_db
 
 from app.schemas.chat import (
     ChatRequest,
@@ -10,6 +12,7 @@ from app.schemas.chat import (
 )
 
 from app.services.ai_service import ask_ai
+from app.services.conversation_service import get_or_create_conversation
 
 from app.services.message_service import (
     save_message,
@@ -25,8 +28,6 @@ from app.services.memory_extractor import (
     extract_memory,
 )
 
-from app.database.database import SessionLocal
-
 
 router = APIRouter()
 
@@ -35,18 +36,29 @@ router = APIRouter()
     "/chat",
     response_model=ChatResponse
 )
-def chat(request: ChatRequest):
+def chat(
+    request: ChatRequest,
+    db: Session = Depends(get_db),
+):
 
     logger.info(
         f"Chat request received for conversation {request.conversation_id}"
     )
 
+    get_or_create_conversation(
+        db,
+        request.conversation_id,
+        request.user_id,
+    )
+
 
     # Save user message
     save_message(
+        db,
         request.conversation_id,
         "user",
         request.message,
+        request.user_id,
     )
 
 
@@ -63,8 +75,6 @@ def chat(request: ChatRequest):
 
         if memory_data.get("remember"):
 
-            db = SessionLocal()
-
             save_memory(
                 db=db,
                 user_id=request.user_id,
@@ -72,8 +82,6 @@ def chat(request: ChatRequest):
                 key=memory_data["key"],
                 value=memory_data["value"],
             )
-
-            db.close()
 
     except Exception as e:
 
@@ -84,19 +92,16 @@ def chat(request: ChatRequest):
 
     # Load conversation history
     history = get_messages(
+        db,
         request.conversation_id
     )
 
 
     # Load long-term memories
-    db = SessionLocal()
-
     memories = get_memories(
         db,
         request.user_id,
     )
-
-    db.close()
 
 
     # Generate AI response
@@ -109,9 +114,11 @@ def chat(request: ChatRequest):
 
     # Save assistant response
     save_message(
+        db,
         request.conversation_id,
         "assistant",
         response,
+        request.user_id,
     )
 
 

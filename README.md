@@ -2,79 +2,116 @@
 
 ## Overview
 
-This project documents the design and development of a personal AI assistant built from scratch.
+Personal AI Assistant is an early-stage FastAPI backend for a modular personal AI operating system. The current system supports chat, message history, long-term memory extraction, and memory management.
 
-The goal is to create an intelligent assistant capable of:
+## Current Architecture
 
-- Managing personal notes
-- Answering questions using Retrieval-Augmented Generation (RAG)
-- Processing voice, documents, emails, and images
-- Performing actions through AI tools
-- Serving as a long-term personal knowledge base
+```text
+FastAPI
+  app/main.py
+    /health
+    /chat
+    /memories
 
-This repository records the complete software engineering process, including architecture decisions, implementation milestones, documentation, and lessons learned.
+Routers
+  app/routers/chat.py
+  app/routers/memories.py
+  app/routers/health.py
 
----
+Services
+  OpenAI response generation
+  Memory extraction
+  Conversation/message persistence
+  Memory CRUD
 
-## Project Status
+Database
+  PostgreSQL
+  SQLAlchemy ORM
+  Alembic migrations
 
-🚧 In Development
-
-Current milestone:
-
-- [ ] Project setup
-- [ ] FastAPI backend
-- [ ] OpenAI integration
-- [ ] PostgreSQL database
-- [ ] Semantic search
-- [ ] Voice input
-- [ ] Document ingestion
-- [ ] AI agent tools
-- [ ] Web interface
-
----
-
-## Planned Technology Stack
-
-| Component | Technology |
-|-----------|------------|
-| Backend | FastAPI |
-| AI | OpenAI Responses API |
-| Database | PostgreSQL |
-| Vector Search | pgvector |
-| ORM | SQLAlchemy |
-| Frontend | React |
-| Speech | OpenAI Speech-to-Text |
-| Document Parsing | PyMuPDF, python-docx |
-| Version Control | Git + GitHub |
-
----
-
-## Repository Structure
-
-```
-app/
-docs/
-tests/
-frontend/
-database/
-scripts/
-assets/
+Models
+  Conversation
+  Message
+  Memory
 ```
 
----
+## Requirements
 
-## Development Philosophy
+- Python 3.12+
+- PostgreSQL
+- OpenAI API key
 
-This repository emphasizes:
+Install dependencies:
 
-- Clean architecture
-- Incremental development
-- Thorough documentation
-- Version-controlled design decisions
-- Continuous learning
+```bash
+pip install -r requirements.txt
+```
 
----
+## Local Configuration
+
+Create `.env` from `.env.example`:
+
+```bash
+APP_NAME=Personal AI Assistant
+APP_VERSION=0.1.0
+APP_ENV=development
+OPENAI_API_KEY=your_api_key_here
+DATABASE_URL=postgresql+psycopg2://username:password@localhost:5432/personal_ai
+```
+
+PostgreSQL is the expected database. SQLite is only supported for tests with `APP_ENV=test`.
+
+## Database Migrations
+
+Apply migrations:
+
+```bash
+alembic upgrade head
+```
+
+Check the current migration:
+
+```bash
+alembic current
+```
+
+Create a new migration after model changes:
+
+```bash
+alembic revision --autogenerate -m "Describe change"
+```
+
+## Run Locally
+
+```bash
+uvicorn app.main:app --reload
+```
+
+Health check:
+
+```bash
+curl http://127.0.0.1:8000/health
+```
+
+## Testing
+
+Run the test suite:
+
+```bash
+pytest
+```
+
+The tests use an isolated SQLite database with `APP_ENV=test` so they do not require a local PostgreSQL server.
+
+## Roadmap
+
+- Identity layer with users, authentication, and user-owned data
+- Knowledge layer with document ingestion, embeddings, vector search, and RAG
+- Memory layer with ranking, updates, provenance, and relationship modeling
+- Agent layer with specialized cooperative agents
+- Multi-model routing for OpenAI, Gemini, Claude, and Grok
+- Tool/action system with permissions and audit logs
+- React frontend for chat, memories, documents, tasks, and settings
 
 ## License
 

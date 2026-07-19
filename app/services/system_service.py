@@ -6,5 +6,5 @@ def get_system_status():
 
     return {
         "application": "Personal AI Assistant",
-        "status": "running"
+        "status": "healthy"
     }
