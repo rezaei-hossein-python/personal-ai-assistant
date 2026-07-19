@@ -12,3 +12,9 @@ SessionLocal = sessionmaker(
 )
 
 Base = declarative_base()
+
+
+# Import models so SQLAlchemy and Alembic can discover them
+from app.models.conversation import Conversation
+from app.models.message import Message
+from app.models.memory import Memory
