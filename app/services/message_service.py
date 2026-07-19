@@ -25,15 +25,16 @@ def save_message(
 def get_messages(
     db,
     conversation_id: str,
+    user_id: int | None = None,
 ):
-    messages = (
-        db.query(Message)
-        .filter(
-            Message.conversation_id == conversation_id
-        )
-        .order_by(Message.id)
-        .all()
+    query = db.query(Message).filter(
+        Message.conversation_id == conversation_id
     )
+
+    if user_id is not None:
+        query = query.filter(Message.user_id == user_id)
+
+    messages = query.order_by(Message.id).all()
 
     return [
         {

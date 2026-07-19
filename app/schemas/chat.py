@@ -3,7 +3,6 @@ from pydantic import BaseModel
 
 class ChatRequest(BaseModel):
     conversation_id: str
-    user_id: int
     message: str
 
 

@@ -12,6 +12,7 @@ from app.database.database import Base
 import app.models.conversation
 import app.models.message
 import app.models.memory
+import app.models.user
 
 
 # Alembic Config object

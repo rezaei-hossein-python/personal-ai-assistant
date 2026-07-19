@@ -7,6 +7,8 @@ class Settings(BaseSettings):
     APP_ENV: str = "development"
 
     OPENAI_API_KEY: str = ""
+    SECRET_KEY: str = "change-me-in-development"
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
     DATABASE_URL: str = (
         "postgresql+psycopg2://username:password@localhost:5432/personal_ai"
     )

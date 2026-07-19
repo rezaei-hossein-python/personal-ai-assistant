@@ -2,6 +2,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.database.database import get_db
+from app.dependencies import get_current_user
+from app.models.user import User
 from app.schemas.memory import MemoryCreate, MemoryResponse
 from app.services.memory_service import (
     save_memory,
@@ -17,22 +19,23 @@ router = APIRouter(prefix="/memories", tags=["memories"])
 def create_memory(
     request: MemoryCreate,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     return save_memory(
         db=db,
-        user_id=request.user_id,
+        user_id=current_user.id,
         category=request.category,
         key=request.key,
         value=request.value,
     )
 
 
-@router.get("/{user_id}", response_model=list[MemoryResponse])
+@router.get("", response_model=list[MemoryResponse])
 def list_memories(
-    user_id: int,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    memories = get_memories(db, user_id)
+    memories = get_memories(db, current_user.id)
     return memories
 
 
@@ -40,8 +43,9 @@ def list_memories(
 def remove_memory(
     memory_id: int,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    deleted = delete_memory(db, memory_id)
+    deleted = delete_memory(db, memory_id, current_user.id)
 
     if not deleted:
         raise HTTPException(status_code=404, detail="Memory not found")

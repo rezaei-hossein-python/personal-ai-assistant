@@ -19,18 +19,23 @@ def create_conversation(db, conversation_id: str, user_id: int | None = None):
     return conversation
 
 
-def get_conversation(db, conversation_id: str):
+def get_conversation(
+    db,
+    conversation_id: str,
+    user_id: int | None = None,
+):
     logger.info(
         f"Getting conversation {conversation_id}"
     )
 
-    conversation = (
-        db.query(Conversation)
-        .filter(
-            Conversation.conversation_id == conversation_id
-        )
-        .first()
+    query = db.query(Conversation).filter(
+        Conversation.conversation_id == conversation_id
     )
+
+    if user_id is not None:
+        query = query.filter(Conversation.user_id == user_id)
+
+    conversation = query.first()
 
     return conversation
 
@@ -43,6 +48,7 @@ def get_or_create_conversation(
     conversation = get_conversation(
         db,
         conversation_id,
+        user_id,
     )
 
     if conversation:

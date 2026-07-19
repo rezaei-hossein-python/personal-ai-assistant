@@ -55,10 +55,14 @@ def get_memories(
 def delete_memory(
     db: Session,
     memory_id: int,
+    user_id: int,
 ):
     memory = (
         db.query(Memory)
-        .filter(Memory.id == memory_id)
+        .filter(
+            Memory.id == memory_id,
+            Memory.user_id == user_id,
+        )
         .first()
     )
 

@@ -5,6 +5,8 @@ from sqlalchemy.orm import Session
 
 from app.core.logging import logger
 from app.database.database import get_db
+from app.dependencies import get_current_user
+from app.models.user import User
 
 from app.schemas.chat import (
     ChatRequest,
@@ -39,6 +41,7 @@ router = APIRouter()
 def chat(
     request: ChatRequest,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
 
     logger.info(
@@ -48,7 +51,7 @@ def chat(
     get_or_create_conversation(
         db,
         request.conversation_id,
-        request.user_id,
+        current_user.id,
     )
 
 
@@ -58,7 +61,7 @@ def chat(
         request.conversation_id,
         "user",
         request.message,
-        request.user_id,
+        current_user.id,
     )
 
 
@@ -77,7 +80,7 @@ def chat(
 
             save_memory(
                 db=db,
-                user_id=request.user_id,
+                user_id=current_user.id,
                 category=memory_data["category"],
                 key=memory_data["key"],
                 value=memory_data["value"],
@@ -93,14 +96,15 @@ def chat(
     # Load conversation history
     history = get_messages(
         db,
-        request.conversation_id
+        request.conversation_id,
+        current_user.id,
     )
 
 
     # Load long-term memories
     memories = get_memories(
         db,
-        request.user_id,
+        current_user.id,
     )
 
 
@@ -118,7 +122,7 @@ def chat(
         request.conversation_id,
         "assistant",
         response,
-        request.user_id,
+        current_user.id,
     )
 
 

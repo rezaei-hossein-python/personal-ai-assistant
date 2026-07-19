@@ -10,15 +10,21 @@ Personal AI Assistant is an early-stage FastAPI backend for a modular personal A
 FastAPI
   app/main.py
     /health
+    /auth/register
+    /auth/login
     /chat
     /memories
 
 Routers
+  app/routers/auth.py
   app/routers/chat.py
   app/routers/memories.py
   app/routers/health.py
 
 Services
+  User registration/login
+  Password hashing
+  JWT access tokens
   OpenAI response generation
   Memory extraction
   Conversation/message persistence
@@ -30,6 +36,7 @@ Database
   Alembic migrations
 
 Models
+  User
   Conversation
   Message
   Memory
@@ -56,6 +63,8 @@ APP_NAME=Personal AI Assistant
 APP_VERSION=0.1.0
 APP_ENV=development
 OPENAI_API_KEY=your_api_key_here
+SECRET_KEY=replace_with_a_long_random_secret
+ACCESS_TOKEN_EXPIRE_MINUTES=60
 DATABASE_URL=postgresql+psycopg2://username:password@localhost:5432/personal_ai
 ```
 
@@ -91,6 +100,40 @@ Health check:
 
 ```bash
 curl http://127.0.0.1:8000/health
+```
+
+## Authentication
+
+Register a user:
+
+```bash
+curl -X POST http://127.0.0.1:8000/auth/register \
+  -H "Content-Type: application/json" \
+  -d "{\"email\":\"you@example.com\",\"name\":\"Your Name\",\"password\":\"your-password\"}"
+```
+
+Log in to get a bearer token:
+
+```bash
+curl -X POST http://127.0.0.1:8000/auth/login \
+  -H "Content-Type: application/json" \
+  -d "{\"email\":\"you@example.com\",\"password\":\"your-password\"}"
+```
+
+Use the token with protected endpoints:
+
+```bash
+curl -X POST http://127.0.0.1:8000/chat \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
+  -d "{\"conversation_id\":\"default\",\"message\":\"Hello\"}"
+```
+
+Memory endpoints are also protected:
+
+```bash
+curl http://127.0.0.1:8000/memories \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
 ```
 
 ## Testing
