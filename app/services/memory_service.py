@@ -30,6 +30,27 @@ def get_memories(
 ):
     return (
         db.query(Memory)
-        .filter(Memory.user_id == user_id)
+        .filter(
+            Memory.user_id == user_id
+        )
+        .order_by(
+            Memory.created_at.desc()
+        )
         .all()
     )
+
+
+def format_memories(
+    memories: list,
+):
+    if not memories:
+        return ""
+
+    formatted = []
+
+    for memory in memories:
+        formatted.append(
+            f"{memory.key}: {memory.value}"
+        )
+
+    return "\n".join(formatted)

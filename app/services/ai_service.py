@@ -8,28 +8,56 @@ client = OpenAI(
 )
 
 
-def ask_ai(message: str, history: list):
+def ask_ai(
+    message: str,
+    history: list,
+    memories: list = None,
+):
 
     conversation = []
 
+    if memories:
+
+        memory_text = "\n".join(
+            [
+                f"{memory.key}: {memory.value}"
+                for memory in memories
+            ]
+        )
+
+        conversation.append(
+            {
+                "role": "system",
+                "content": (
+                    "Known user information:\n"
+                    f"{memory_text}"
+                )
+            }
+        )
+
+
     for item in history:
+
         conversation.append(
             {
                 "role": item["role"],
-                "content": item["content"]
+                "content": item["content"],
             }
         )
+
 
     conversation.append(
         {
             "role": "user",
-            "content": message
+            "content": message,
         }
     )
 
+
     response = client.responses.create(
         model="gpt-4.1-mini",
-        input=conversation
+        input=conversation,
     )
+
 
     return response.output_text
