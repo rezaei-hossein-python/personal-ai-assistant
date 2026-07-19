@@ -4,6 +4,9 @@ from sqlalchemy.orm import Session
 
 from app.database.database import get_db
 from app.models.user import User
+from app.orchestrators.chat_orchestrator import ChatOrchestrator
+from app.providers.model_provider import ModelProvider
+from app.providers.openai_provider import OpenAIModelProvider
 from app.services.auth_service import decode_access_token
 from app.services.embedding_service import EmbeddingProvider, get_embedding_provider
 from app.services.user_service import get_user_by_id
@@ -42,3 +45,11 @@ def get_current_user(
 
 def get_current_embedding_provider() -> EmbeddingProvider:
     return get_embedding_provider()
+
+
+def get_current_model_provider() -> ModelProvider:
+    return OpenAIModelProvider()
+
+
+def get_chat_orchestrator() -> ChatOrchestrator:
+    return ChatOrchestrator()

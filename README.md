@@ -24,6 +24,9 @@ Routers
   app/routers/health.py
 
 Services
+  Chat orchestration
+  Lightweight planner, memory, knowledge, action, and evaluator agents
+  Provider-neutral model interface
   User registration/login
   Password hashing
   JWT access tokens
@@ -198,16 +201,26 @@ RAG architecture:
 
 ```text
 Authenticated chat request
-  load user memories
-  load user conversation history
-  retrieve relevant user-owned document chunks when vector search is available
-  build prompt from memories, history, document context, and current message
-  call model provider
+  ChatOrchestrator
+    PlannerAgent selects intent/capabilities
+    MemoryAgent loads relevant user memories
+    KnowledgeAgent retrieves user-owned document chunks
+    ActionAgent reserves a safe no-op action interface
+    ModelProvider generates a response
+    EvaluatorAgent records obvious context warnings
 ```
 
 Document chunk metadata keeps source document and chunk identifiers so later frontend citations can point back to the relevant source.
 
 Documents uploaded after Phase 3.1 receive embeddings during ingestion. Documents uploaded before the embedding column existed may need to be re-uploaded or backfilled before they appear in semantic search results.
+
+Backfill missing chunk embeddings:
+
+```bash
+python scripts/backfill_embeddings.py
+```
+
+The backfill command is idempotent: it skips chunks that already have embeddings and reports scanned, updated, skipped, and failed counts.
 
 ## Testing
 

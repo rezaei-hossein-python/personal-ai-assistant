@@ -1,20 +1,6 @@
-try:
-    from openai import OpenAI
-except ImportError:  # pragma: no cover - depends on environment
-    OpenAI = None
-
-from app.config import settings
+from app.providers.model_provider import ModelProvider
+from app.providers.openai_provider import OpenAIModelProvider
 from app.services.prompt_service import build_chat_messages
-
-
-def _get_client():
-    if OpenAI is None:
-        raise RuntimeError("The openai package is not installed")
-
-    if not settings.OPENAI_API_KEY:
-        raise RuntimeError("OPENAI_API_KEY is not configured")
-
-    return OpenAI(api_key=settings.OPENAI_API_KEY)
 
 
 def ask_ai(
@@ -22,6 +8,7 @@ def ask_ai(
     history: list,
     memories: list = None,
     document_chunks: list = None,
+    model_provider: ModelProvider | None = None,
 ):
     conversation = build_chat_messages(
         message=message,
@@ -31,12 +18,5 @@ def ask_ai(
     )
 
 
-    client = _get_client()
-
-    response = client.responses.create(
-        model="gpt-4.1-mini",
-        input=conversation,
-    )
-
-
-    return response.output_text
+    provider = model_provider or OpenAIModelProvider()
+    return provider.generate(conversation)

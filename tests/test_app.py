@@ -8,13 +8,22 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.database.database import Base, SessionLocal, engine
-from app.dependencies import get_current_embedding_provider
+from app.dependencies import (
+    get_chat_orchestrator,
+    get_current_embedding_provider,
+    get_current_model_provider,
+)
 from app.main import app
 from app.models.document_chunk import DocumentChunk
+from app.providers.model_provider import ModelProvider
+from app.orchestrators.chat_orchestrator import ChatOrchestrator
 from app.services.embedding_service import EmbeddingProvider
+from app.services.embedding_backfill_service import backfill_missing_chunk_embeddings
 from app.services.chunking_service import chunk_text
 from app.services.retrieval_service import RetrievedChunk
 from app.services.text_extraction_service import extract_text
+from app.agents.planner_agent import PlannerAgent
+from app.agents.types import Intent
 
 
 class FakeEmbeddingProvider(EmbeddingProvider):
@@ -25,6 +34,29 @@ class FakeEmbeddingProvider(EmbeddingProvider):
         if "recipe" in lowered:
             return [0.0, 1.0, 0.0]
         return [0.0, 0.0, 1.0]
+
+
+class FakeModelProvider(ModelProvider):
+    provider_name = "fake"
+    generation_model = "fake-chat"
+    embedding_model = "fake-embedding"
+
+    def __init__(self):
+        self.last_messages = []
+
+    def generate(self, messages: list[dict]) -> str:
+        self.last_messages = messages
+        return "Fake model response."
+
+    def generate_structured(
+        self,
+        prompt: str,
+        schema: dict | None = None,
+    ) -> str:
+        return '{"ok": true}'
+
+    def embed_text(self, text: str) -> list[float]:
+        return FakeEmbeddingProvider().embed_text(text)
 
 
 @pytest.fixture(autouse=True)
@@ -39,6 +71,9 @@ def reset_database():
 def client():
     app.dependency_overrides[get_current_embedding_provider] = (
         lambda: FakeEmbeddingProvider()
+    )
+    app.dependency_overrides[get_current_model_provider] = (
+        lambda: FakeModelProvider()
     )
     with TestClient(app) as test_client:
         yield test_client
@@ -157,20 +192,27 @@ def test_memory_creation_and_retrieval(client):
     assert memories[0]["value"] == "VS Code"
 
 
+def test_planner_routing():
+    planner = PlannerAgent()
+
+    assert planner.plan("hello there").intent == Intent.GENERAL_CHAT
+    assert planner.plan("what do you remember about my editor").intent == (
+        Intent.MEMORY_LOOKUP
+    )
+    assert planner.plan("search my documents").intent == Intent.KNOWLEDGE_SEARCH
+    assert planner.plan("use my notes and preferences").intent == (
+        Intent.COMBINED_CONTEXT
+    )
+
+
 def test_chat_flow_persists_messages_and_memory(monkeypatch, client):
     token = register_and_login(client)
 
     monkeypatch.setattr(
-        "app.routers.chat.extract_memory",
+        "app.orchestrators.chat_orchestrator.extract_memory",
         lambda message: (
             '{"remember": true, "category": "preference", '
             '"key": "language", "value": "Python"}'
-        ),
-    )
-    monkeypatch.setattr(
-        "app.routers.chat.ask_ai",
-        lambda message, history, memories, document_chunks: (
-            "Stored that preference."
         ),
     )
 
@@ -184,7 +226,7 @@ def test_chat_flow_persists_messages_and_memory(monkeypatch, client):
     )
 
     assert response.status_code == 200
-    assert response.json()["response"] == "Stored that preference."
+    assert response.json()["response"] == "Fake model response."
 
     memories_response = client.get("/memories", headers=auth_headers(token))
     memories = memories_response.json()
@@ -244,15 +286,18 @@ def test_chat_history_isolated_for_same_conversation_id(monkeypatch, client):
     observed_histories = []
 
     monkeypatch.setattr(
-        "app.routers.chat.extract_memory",
+        "app.orchestrators.chat_orchestrator.extract_memory",
         lambda message: '{"remember": false}',
     )
 
-    def fake_ask_ai(message, history, memories, document_chunks):
-        observed_histories.append(history)
-        return "ok"
+    class ObservingModelProvider(FakeModelProvider):
+        def generate(self, messages: list[dict]) -> str:
+            observed_histories.append(messages)
+            return "ok"
 
-    monkeypatch.setattr("app.routers.chat.ask_ai", fake_ask_ai)
+    app.dependency_overrides[get_current_model_provider] = (
+        lambda: ObservingModelProvider()
+    )
 
     client.post(
         "/chat",
@@ -272,12 +317,14 @@ def test_chat_history_isolated_for_same_conversation_id(monkeypatch, client):
     )
 
     assert response.status_code == 200
-    assert observed_histories[1] == [
-        {
-            "role": "user",
-            "content": "Second user's message",
-        }
-    ]
+    assert {
+        "role": "user",
+        "content": "First user's message",
+    } not in observed_histories[1]
+    assert {
+        "role": "user",
+        "content": "Second user's message",
+    } in observed_histories[1]
 
 
 def test_text_extraction_and_chunking_for_markdown():
@@ -493,11 +540,11 @@ def test_chat_includes_retrieved_document_context(monkeypatch, client):
     observed_document_chunks = []
 
     monkeypatch.setattr(
-        "app.routers.chat.extract_memory",
+        "app.orchestrators.chat_orchestrator.extract_memory",
         lambda message: '{"remember": false}',
     )
     monkeypatch.setattr(
-        "app.routers.chat.retrieve_relevant_chunks",
+        "app.agents.knowledge_agent.retrieve_relevant_chunks",
         lambda db, user_id, query, embedding_provider: [
             RetrievedChunk(
                 document_id=1,
@@ -510,11 +557,14 @@ def test_chat_includes_retrieved_document_context(monkeypatch, client):
         ],
     )
 
-    def fake_ask_ai(message, history, memories, document_chunks):
-        observed_document_chunks.extend(document_chunks)
-        return "Used document context."
+    class ObservingModelProvider(FakeModelProvider):
+        def generate(self, messages: list[dict]) -> str:
+            observed_document_chunks.extend(messages)
+            return "Used document context."
 
-    monkeypatch.setattr("app.routers.chat.ask_ai", fake_ask_ai)
+    app.dependency_overrides[get_current_model_provider] = (
+        lambda: ObservingModelProvider()
+    )
 
     response = client.post(
         "/chat",
@@ -527,4 +577,228 @@ def test_chat_includes_retrieved_document_context(monkeypatch, client):
 
     assert response.status_code == 200
     assert response.json()["response"] == "Used document context."
-    assert observed_document_chunks[0].document_name == "notes.txt"
+    assert any(
+        "Relevant document context." in message["content"]
+        for message in observed_document_chunks
+    )
+
+
+def test_orchestrator_memory_only_request(monkeypatch, client):
+    token = register_and_login(client)
+    observed_messages = []
+
+    client.post(
+        "/memories",
+        headers=auth_headers(token),
+        json={
+            "category": "preference",
+            "key": "editor",
+            "value": "VS Code",
+        },
+    )
+    monkeypatch.setattr(
+        "app.orchestrators.chat_orchestrator.extract_memory",
+        lambda message: '{"remember": false}',
+    )
+
+    class ObservingModelProvider(FakeModelProvider):
+        def generate(self, messages: list[dict]) -> str:
+            observed_messages.extend(messages)
+            return "memory-only"
+
+    app.dependency_overrides[get_current_model_provider] = (
+        lambda: ObservingModelProvider()
+    )
+
+    response = client.post(
+        "/chat",
+        headers=auth_headers(token),
+        json={
+            "conversation_id": "memory-only",
+            "message": "What do you remember about my editor?",
+        },
+    )
+
+    assert response.status_code == 200
+    assert any("editor: VS Code" in item["content"] for item in observed_messages)
+
+
+def test_orchestrator_knowledge_only_request(monkeypatch, client):
+    token = register_and_login(client)
+    observed_messages = []
+
+    monkeypatch.setattr(
+        "app.orchestrators.chat_orchestrator.extract_memory",
+        lambda message: '{"remember": false}',
+    )
+
+    class ObservingModelProvider(FakeModelProvider):
+        def generate(self, messages: list[dict]) -> str:
+            observed_messages.extend(messages)
+            return "knowledge-only"
+
+    app.dependency_overrides[get_current_model_provider] = (
+        lambda: ObservingModelProvider()
+    )
+    client.post(
+        "/documents/upload",
+        headers=auth_headers(token),
+        files={
+            "file": (
+                "architecture.txt",
+                b"System architecture notes.",
+                "text/plain",
+            )
+        },
+    )
+
+    response = client.post(
+        "/chat",
+        headers=auth_headers(token),
+        json={
+            "conversation_id": "knowledge-only",
+            "message": "Search my documents for architecture",
+        },
+    )
+
+    assert response.status_code == 200
+    assert any(
+        "System architecture notes" in item["content"]
+        for item in observed_messages
+    )
+
+
+def test_orchestrator_combined_context_and_metadata(monkeypatch, client):
+    token = register_and_login(client)
+    orchestrator = ChatOrchestrator()
+
+    app.dependency_overrides[get_chat_orchestrator] = lambda: orchestrator
+    monkeypatch.setattr(
+        "app.orchestrators.chat_orchestrator.extract_memory",
+        lambda message: '{"remember": false}',
+    )
+    client.post(
+        "/memories",
+        headers=auth_headers(token),
+        json={
+            "category": "preference",
+            "key": "editor",
+            "value": "VS Code",
+        },
+    )
+    client.post(
+        "/documents/upload",
+        headers=auth_headers(token),
+        files={
+            "file": (
+                "architecture.txt",
+                b"Architecture knowledge.",
+                "text/plain",
+            )
+        },
+    )
+
+    response = client.post(
+        "/chat",
+        headers=auth_headers(token),
+        json={
+            "conversation_id": "combined",
+            "message": "Use my documents and my editor preference",
+        },
+    )
+
+    assert response.status_code == 200
+    metadata = orchestrator.last_execution_metadata
+    assert metadata is not None
+    assert metadata.selected_intent == "combined_context"
+    assert "PlannerAgent" in metadata.agents_invoked
+    assert "EvaluatorAgent" in metadata.agents_invoked
+    assert metadata.retrieval_count == 1
+    assert metadata.provider == "fake"
+
+
+def test_orchestrator_user_isolation(monkeypatch, client):
+    first_token = register_and_login(
+        client,
+        email="first@example.com",
+        name="First User",
+    )
+    second_token = register_and_login(
+        client,
+        email="second@example.com",
+        name="Second User",
+    )
+    observed_messages = []
+
+    monkeypatch.setattr(
+        "app.orchestrators.chat_orchestrator.extract_memory",
+        lambda message: '{"remember": false}',
+    )
+
+    class ObservingModelProvider(FakeModelProvider):
+        def generate(self, messages: list[dict]) -> str:
+            observed_messages.append(messages)
+            return "ok"
+
+    app.dependency_overrides[get_current_model_provider] = (
+        lambda: ObservingModelProvider()
+    )
+    client.post(
+        "/memories",
+        headers=auth_headers(first_token),
+        json={
+            "category": "preference",
+            "key": "private",
+            "value": "first-user-only",
+        },
+    )
+    client.post(
+        "/chat",
+        headers=auth_headers(second_token),
+        json={
+            "conversation_id": "isolation",
+            "message": "What do you remember about my private preference?",
+        },
+    )
+
+    assert not any(
+        "first-user-only" in item["content"]
+        for item in observed_messages[0]
+    )
+
+
+def test_embedding_backfill_idempotency(client):
+    token = register_and_login(client)
+    client.post(
+        "/documents/upload",
+        headers=auth_headers(token),
+        files={
+            "file": (
+                "architecture.txt",
+                b"Architecture content.",
+                "text/plain",
+            )
+        },
+    )
+
+    db = SessionLocal()
+    chunk = db.query(DocumentChunk).first()
+    chunk.embedding = None
+    db.commit()
+    db.close()
+
+    db = SessionLocal()
+    first_result = backfill_missing_chunk_embeddings(
+        db,
+        embedding_provider=FakeEmbeddingProvider(),
+    )
+    second_result = backfill_missing_chunk_embeddings(
+        db,
+        embedding_provider=FakeEmbeddingProvider(),
+    )
+    db.close()
+
+    assert first_result.updated_count == 1
+    assert first_result.failed_count == 0
+    assert second_result.updated_count == 0
+    assert second_result.skipped_count == 1

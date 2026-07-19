@@ -12,6 +12,8 @@ Personal AI Assistant is being developed into a modular personal AI operating sy
 - Alembic migrations for database schema management
 - PostgreSQL as the expected runtime database
 - pgvector-backed semantic document search
+- Chat orchestrator coordinating lightweight planner, memory, knowledge, action, and evaluator agents
+- Provider-neutral model interface with OpenAI implementation
 - JWT bearer-token authentication
 - User-owned conversations, memories, and documents
 - PDF, DOCX, TXT, and Markdown text extraction
@@ -24,15 +26,14 @@ Personal AI Assistant is being developed into a modular personal AI operating sy
 POST /chat
   verify bearer token
   load current user
-  create or load conversation
-  save user message
-  extract possible memory
-  save or update memory
-  load message history
-  load user memories
-  retrieve relevant user document chunks with pgvector cosine search
-  call OpenAI
-  save assistant message
+  call ChatOrchestrator
+  PlannerAgent selects intent and capabilities
+  MemoryAgent loads user memory context
+  KnowledgeAgent retrieves document context when needed
+  ActionAgent returns no-op action metadata
+  model provider generates response
+  EvaluatorAgent records context warnings
+  persist conversation messages
   return response
 ```
 
@@ -88,6 +89,7 @@ POST /documents/upload
 Future phases will add:
 
 - embedding backfill for documents uploaded before Phase 3.1
+- richer agent tools and task execution
 - Richer long-term memory modeling
 - Multi-model routing
 - Agent orchestration
