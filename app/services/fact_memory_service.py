@@ -3,15 +3,15 @@ from sqlalchemy.orm import Session
 from app.models.memory import Memory
 
 
-def save_memory(
+def save_fact(
     db: Session,
-    user_id: int,
+    conversation_id: str,
     category: str,
     key: str,
     value: str,
 ):
     memory = Memory(
-        user_id=user_id,
+        conversation_id=conversation_id,
         category=category,
         key=key,
         value=value,
@@ -24,12 +24,14 @@ def save_memory(
     return memory
 
 
-def get_memories(
+def get_facts(
     db: Session,
-    user_id: int,
+    conversation_id: str,
 ):
     return (
         db.query(Memory)
-        .filter(Memory.user_id == user_id)
+        .filter(
+            Memory.conversation_id == conversation_id
+        )
         .all()
     )

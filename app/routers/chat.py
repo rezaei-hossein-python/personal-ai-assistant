@@ -3,7 +3,7 @@ from fastapi import APIRouter
 from app.core.logging import logger
 from app.schemas.chat import ChatRequest, ChatResponse
 from app.services.ai_service import ask_ai
-from app.services.memory_service import save_message, get_conversation
+from app.services.message_service import save_message, get_messages
 
 
 router = APIRouter()
@@ -19,22 +19,22 @@ def chat(request: ChatRequest):
     save_message(
         request.conversation_id,
         "user",
-        request.message
+        request.message,
     )
 
-    history = get_conversation(
+    history = get_messages(
         request.conversation_id
     )
 
     response = ask_ai(
         request.message,
-        history
+        history,
     )
 
     save_message(
         request.conversation_id,
         "assistant",
-        response
+        response,
     )
 
     return ChatResponse(
