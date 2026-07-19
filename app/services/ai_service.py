@@ -4,6 +4,7 @@ except ImportError:  # pragma: no cover - depends on environment
     OpenAI = None
 
 from app.config import settings
+from app.services.prompt_service import build_chat_messages
 
 
 def _get_client():
@@ -20,45 +21,13 @@ def ask_ai(
     message: str,
     history: list,
     memories: list = None,
+    document_chunks: list = None,
 ):
-
-    conversation = []
-
-    if memories:
-
-        memory_text = "\n".join(
-            [
-                f"{memory.key}: {memory.value}"
-                for memory in memories
-            ]
-        )
-
-        conversation.append(
-            {
-                "role": "system",
-                "content": (
-                    "Known user information:\n"
-                    f"{memory_text}"
-                )
-            }
-        )
-
-
-    for item in history:
-
-        conversation.append(
-            {
-                "role": item["role"],
-                "content": item["content"],
-            }
-        )
-
-
-    conversation.append(
-        {
-            "role": "user",
-            "content": message,
-        }
+    conversation = build_chat_messages(
+        message=message,
+        history=history,
+        memories=memories,
+        document_chunks=document_chunks,
     )
 
 

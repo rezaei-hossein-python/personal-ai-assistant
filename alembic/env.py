@@ -10,6 +10,8 @@ from app.database.database import Base
 
 # Import models so Alembic can detect tables
 import app.models.conversation
+import app.models.document
+import app.models.document_chunk
 import app.models.message
 import app.models.memory
 import app.models.user

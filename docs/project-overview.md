@@ -2,17 +2,20 @@
 
 ## Purpose
 
-Personal AI Assistant is being developed into a modular personal AI operating system. The current phase adds user identity and authenticated access before document knowledge, agents, tools, and a React frontend.
+Personal AI Assistant is being developed into a modular personal AI operating system. The current phase adds user-owned document ingestion, chunking, and a retrieval-ready RAG foundation before agents, tools, and a React frontend.
 
 ## Current Backend
 
 - FastAPI application in `app/main.py`
-- Routers for health, authentication, chat, and memories
-- SQLAlchemy models for users, conversations, messages, and memories
+- Routers for health, authentication, chat, memories, and documents
+- SQLAlchemy models for users, conversations, messages, memories, documents, and document chunks
 - Alembic migrations for database schema management
 - PostgreSQL as the expected runtime database
+- pgvector required for semantic document search
 - JWT bearer-token authentication
-- User-owned conversations and memories
+- User-owned conversations, memories, and documents
+- PDF, DOCX, TXT, and Markdown text extraction
+- Reusable text chunking prepared for embeddings
 - OpenAI Responses API integration for chat and memory extraction
 
 ## Current Request Flow
@@ -27,9 +30,21 @@ POST /chat
   save or update memory
   load message history
   load user memories
+  retrieve relevant user document chunks when vector search is available
   call OpenAI
   save assistant message
   return response
+```
+
+```text
+POST /documents/upload
+  verify bearer token
+  load current user
+  validate file type
+  extract text
+  chunk text
+  store document metadata
+  store chunks linked to the document
 ```
 
 ## Local Development
@@ -72,7 +87,7 @@ POST /chat
 
 Future phases will add:
 
-- Document ingestion and vector search
+- pgvector-backed embeddings and semantic retrieval once the extension is available
 - Richer long-term memory modeling
 - Multi-model routing
 - Agent orchestration

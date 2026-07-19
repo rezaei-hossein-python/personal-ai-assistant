@@ -2,7 +2,7 @@
 
 ## Overview
 
-Personal AI Assistant is an early-stage FastAPI backend for a modular personal AI operating system. The current system supports chat, message history, long-term memory extraction, and memory management.
+Personal AI Assistant is an early-stage FastAPI backend for a modular personal AI operating system. The current system supports authenticated chat, message history, long-term memory extraction, memory management, document ingestion, and a retrieval-ready RAG foundation.
 
 ## Current Architecture
 
@@ -14,10 +14,12 @@ FastAPI
     /auth/login
     /chat
     /memories
+    /documents
 
 Routers
   app/routers/auth.py
   app/routers/chat.py
+  app/routers/documents.py
   app/routers/memories.py
   app/routers/health.py
 
@@ -26,12 +28,16 @@ Services
   Password hashing
   JWT access tokens
   OpenAI response generation
+  OpenAI embedding provider abstraction
   Memory extraction
+  Document parsing and chunking
+  Retrieval/RAG prompt context
   Conversation/message persistence
-  Memory CRUD
+  Memory and document CRUD
 
 Database
   PostgreSQL
+  pgvector required for semantic search
   SQLAlchemy ORM
   Alembic migrations
 
@@ -40,12 +46,15 @@ Models
   Conversation
   Message
   Memory
+  Document
+  DocumentChunk
 ```
 
 ## Requirements
 
 - Python 3.12+
 - PostgreSQL
+- pgvector extension for semantic document search
 - OpenAI API key
 
 Install dependencies:
@@ -69,6 +78,8 @@ DATABASE_URL=postgresql+psycopg2://username:password@localhost:5432/personal_ai
 ```
 
 PostgreSQL is the expected database. SQLite is only supported for tests with `APP_ENV=test`.
+
+Semantic document search requires PostgreSQL with the `vector` extension available. If pgvector is not installed, document upload, parsing, chunking, listing, metadata retrieval, and deletion still work, but semantic retrieval returns a clear `503` response.
 
 ## Database Migrations
 
@@ -135,6 +146,66 @@ Memory endpoints are also protected:
 curl http://127.0.0.1:8000/memories \
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
 ```
+
+## Documents And RAG
+
+Supported upload formats:
+
+- PDF: `application/pdf`, `.pdf`
+- DOCX: `application/vnd.openxmlformats-officedocument.wordprocessingml.document`, `.docx`
+- TXT: `text/plain`, `.txt`
+- Markdown: `text/markdown`, `text/x-markdown`, `.md`, `.markdown`
+
+Upload a document:
+
+```bash
+curl -X POST http://127.0.0.1:8000/documents/upload \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
+  -F "file=@notes.md;type=text/markdown"
+```
+
+List your documents:
+
+```bash
+curl http://127.0.0.1:8000/documents \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
+```
+
+Get document metadata:
+
+```bash
+curl http://127.0.0.1:8000/documents/1 \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
+```
+
+Delete a document and its chunks:
+
+```bash
+curl -X DELETE http://127.0.0.1:8000/documents/1 \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
+```
+
+Search documents when pgvector is available:
+
+```bash
+curl -X POST http://127.0.0.1:8000/documents/search \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
+  -d "{\"query\":\"project architecture\",\"limit\":5}"
+```
+
+RAG architecture:
+
+```text
+Authenticated chat request
+  load user memories
+  load user conversation history
+  retrieve relevant user-owned document chunks when vector search is available
+  build prompt from memories, history, document context, and current message
+  call model provider
+```
+
+Document chunk metadata keeps source document and chunk identifiers so later frontend citations can point back to the relevant source.
 
 ## Testing
 

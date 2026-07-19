@@ -3,8 +3,11 @@ fastapi
 httpx
 openai
 psycopg2-binary
+PyMuPDF
 pydantic-settings
 pytest
+python-docx
 python-dotenv
+python-multipart
 sqlalchemy
 uvicorn

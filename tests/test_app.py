@@ -7,8 +7,12 @@ os.environ["OPENAI_API_KEY"] = "test-key"
 import pytest
 from fastapi.testclient import TestClient
 
-from app.database.database import Base, engine
+from app.database.database import Base, SessionLocal, engine
 from app.main import app
+from app.models.document_chunk import DocumentChunk
+from app.services.chunking_service import chunk_text
+from app.services.retrieval_service import RetrievedChunk
+from app.services.text_extraction_service import extract_text
 
 
 @pytest.fixture(autouse=True)
@@ -106,9 +110,11 @@ def test_unauthorized_access_is_rejected(client):
         },
     )
     memories_response = client.get("/memories")
+    documents_response = client.get("/documents")
 
     assert chat_response.status_code == 401
     assert memories_response.status_code == 401
+    assert documents_response.status_code == 401
 
 
 def test_memory_creation_and_retrieval(client):
@@ -147,7 +153,9 @@ def test_chat_flow_persists_messages_and_memory(monkeypatch, client):
     )
     monkeypatch.setattr(
         "app.routers.chat.ask_ai",
-        lambda message, history, memories: "Stored that preference.",
+        lambda message, history, memories, document_chunks: (
+            "Stored that preference."
+        ),
     )
 
     response = client.post(
@@ -224,7 +232,7 @@ def test_chat_history_isolated_for_same_conversation_id(monkeypatch, client):
         lambda message: '{"remember": false}',
     )
 
-    def fake_ask_ai(message, history, memories):
+    def fake_ask_ai(message, history, memories, document_chunks):
         observed_histories.append(history)
         return "ok"
 
@@ -254,3 +262,176 @@ def test_chat_history_isolated_for_same_conversation_id(monkeypatch, client):
             "content": "Second user's message",
         }
     ]
+
+
+def test_text_extraction_and_chunking_for_markdown():
+    text, metadata = extract_text(
+        file_bytes=b"# Title\n\nThis is markdown content.",
+        filename="notes.md",
+        content_type="text/markdown",
+    )
+    chunks = chunk_text(text, max_characters=12, overlap_characters=3)
+
+    assert metadata["document_type"] == "md"
+    assert "markdown content" in text
+    assert len(chunks) > 1
+    assert chunks[0].chunk_index == 0
+
+
+def test_document_upload_and_listing(client):
+    token = register_and_login(client)
+
+    upload_response = client.post(
+        "/documents/upload",
+        headers=auth_headers(token),
+        files={
+            "file": (
+                "notes.txt",
+                b"Personal knowledge about project architecture.",
+                "text/plain",
+            )
+        },
+    )
+
+    assert upload_response.status_code == 200
+    document = upload_response.json()
+    assert document["original_filename"] == "notes.txt"
+    assert document["processing_status"] == "completed"
+    assert document["metadata"]["chunk_count"] == 1
+
+    list_response = client.get("/documents", headers=auth_headers(token))
+
+    assert list_response.status_code == 200
+    assert len(list_response.json()) == 1
+
+
+def test_document_ownership_isolation(client):
+    first_token = register_and_login(
+        client,
+        email="first@example.com",
+        name="First User",
+    )
+    second_token = register_and_login(
+        client,
+        email="second@example.com",
+        name="Second User",
+    )
+    upload_response = client.post(
+        "/documents/upload",
+        headers=auth_headers(first_token),
+        files={
+            "file": (
+                "private.txt",
+                b"Private document content.",
+                "text/plain",
+            )
+        },
+    )
+    document_id = upload_response.json()["id"]
+
+    first_list = client.get("/documents", headers=auth_headers(first_token))
+    second_list = client.get("/documents", headers=auth_headers(second_token))
+    second_get = client.get(
+        f"/documents/{document_id}",
+        headers=auth_headers(second_token),
+    )
+
+    assert len(first_list.json()) == 1
+    assert second_list.json() == []
+    assert second_get.status_code == 404
+
+
+def test_document_delete_cascades_chunks(client):
+    token = register_and_login(client)
+    upload_response = client.post(
+        "/documents/upload",
+        headers=auth_headers(token),
+        files={
+            "file": (
+                "delete-me.txt",
+                b"Cascade chunk content.",
+                "text/plain",
+            )
+        },
+    )
+    document_id = upload_response.json()["id"]
+
+    db = SessionLocal()
+    chunk_count_before_delete = db.query(DocumentChunk).count()
+    db.close()
+
+    delete_response = client.delete(
+        f"/documents/{document_id}",
+        headers=auth_headers(token),
+    )
+    get_response = client.get(
+        f"/documents/{document_id}",
+        headers=auth_headers(token),
+    )
+
+    assert delete_response.status_code == 200
+    assert get_response.status_code == 404
+    assert chunk_count_before_delete == 1
+
+    db = SessionLocal()
+    chunk_count_after_delete = db.query(DocumentChunk).count()
+    db.close()
+    assert chunk_count_after_delete == 0
+
+
+def test_semantic_retrieval_reports_pgvector_unavailable(client):
+    token = register_and_login(client)
+
+    response = client.post(
+        "/documents/search",
+        headers=auth_headers(token),
+        json={
+            "query": "architecture",
+            "limit": 3,
+        },
+    )
+
+    assert response.status_code == 503
+    assert "pgvector" in response.json()["detail"]
+
+
+def test_chat_includes_retrieved_document_context(monkeypatch, client):
+    token = register_and_login(client)
+    observed_document_chunks = []
+
+    monkeypatch.setattr(
+        "app.routers.chat.extract_memory",
+        lambda message: '{"remember": false}',
+    )
+    monkeypatch.setattr(
+        "app.routers.chat.retrieve_relevant_chunks",
+        lambda db, user_id, query: [
+            RetrievedChunk(
+                document_id=1,
+                document_name="notes.txt",
+                chunk_id=10,
+                chunk_index=0,
+                content="Relevant document context.",
+                metadata={"source": "test"},
+            )
+        ],
+    )
+
+    def fake_ask_ai(message, history, memories, document_chunks):
+        observed_document_chunks.extend(document_chunks)
+        return "Used document context."
+
+    monkeypatch.setattr("app.routers.chat.ask_ai", fake_ask_ai)
+
+    response = client.post(
+        "/chat",
+        headers=auth_headers(token),
+        json={
+            "conversation_id": "rag-test",
+            "message": "Use my notes.",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["response"] == "Used document context."
+    assert observed_document_chunks[0].document_name == "notes.txt"

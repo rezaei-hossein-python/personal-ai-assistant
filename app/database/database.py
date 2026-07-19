@@ -68,6 +68,8 @@ def check_database_connection():
 
 # Import models so SQLAlchemy and Alembic can discover them
 from app.models.conversation import Conversation
+from app.models.document import Document
+from app.models.document_chunk import DocumentChunk
 from app.models.message import Message
 from app.models.memory import Memory
 from app.models.user import User

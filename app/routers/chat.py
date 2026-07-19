@@ -29,6 +29,10 @@ from app.services.memory_service import (
 from app.services.memory_extractor import (
     extract_memory,
 )
+from app.services.retrieval_service import (
+    VectorSearchUnavailableError,
+    retrieve_relevant_chunks,
+)
 
 
 router = APIRouter()
@@ -107,12 +111,22 @@ def chat(
         current_user.id,
     )
 
+    try:
+        document_chunks = retrieve_relevant_chunks(
+            db=db,
+            user_id=current_user.id,
+            query=request.message,
+        )
+    except VectorSearchUnavailableError:
+        document_chunks = []
+
 
     # Generate AI response
     response = ask_ai(
         request.message,
         history,
         memories,
+        document_chunks,
     )
 
 
