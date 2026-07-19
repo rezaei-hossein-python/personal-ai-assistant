@@ -1,3 +1,5 @@
+import json
+
 from fastapi import APIRouter
 
 from app.core.logging import logger
@@ -16,6 +18,11 @@ from app.services.message_service import (
 
 from app.services.memory_service import (
     get_memories,
+    save_memory,
+)
+
+from app.services.memory_extractor import (
+    extract_memory,
 )
 
 from app.database.database import SessionLocal
@@ -35,6 +42,7 @@ def chat(request: ChatRequest):
     )
 
 
+    # Save user message
     save_message(
         request.conversation_id,
         "user",
@@ -42,11 +50,45 @@ def chat(request: ChatRequest):
     )
 
 
+    # Extract possible long-term memory
+    memory_result = extract_memory(
+        request.message
+    )
+
+    try:
+
+        memory_data = json.loads(
+            memory_result
+        )
+
+        if memory_data.get("remember"):
+
+            db = SessionLocal()
+
+            save_memory(
+                db=db,
+                user_id=request.user_id,
+                category=memory_data["category"],
+                key=memory_data["key"],
+                value=memory_data["value"],
+            )
+
+            db.close()
+
+    except Exception as e:
+
+        logger.error(
+            f"Memory extraction failed: {e}"
+        )
+
+
+    # Load conversation history
     history = get_messages(
         request.conversation_id
     )
 
 
+    # Load long-term memories
     db = SessionLocal()
 
     memories = get_memories(
@@ -57,6 +99,7 @@ def chat(request: ChatRequest):
     db.close()
 
 
+    # Generate AI response
     response = ask_ai(
         request.message,
         history,
@@ -64,6 +107,7 @@ def chat(request: ChatRequest):
     )
 
 
+    # Save assistant response
     save_message(
         request.conversation_id,
         "assistant",
