@@ -7,10 +7,12 @@ from app.dependencies import (
     get_current_embedding_provider,
     get_current_model_provider,
     get_current_user,
+    get_model_router,
 )
 from app.models.user import User
 from app.orchestrators.chat_orchestrator import ChatOrchestrator
 from app.providers.model_provider import ModelProvider
+from app.providers.model_router import ModelRouter
 from app.schemas.chat import ChatRequest, ChatResponse
 from app.services.embedding_service import EmbeddingProvider
 
@@ -27,6 +29,7 @@ def chat(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     model_provider: ModelProvider = Depends(get_current_model_provider),
+    model_router: ModelRouter = Depends(get_model_router),
     embedding_provider: EmbeddingProvider = Depends(get_current_embedding_provider),
     orchestrator: ChatOrchestrator = Depends(get_chat_orchestrator),
 ):
@@ -37,6 +40,7 @@ def chat(
         message=request.message,
         model_provider=model_provider,
         embedding_provider=embedding_provider,
+        model_router=model_router,
     )
 
     return ChatResponse(response=response)

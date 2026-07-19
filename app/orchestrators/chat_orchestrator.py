@@ -10,6 +10,7 @@ from app.agents.planner_agent import PlannerAgent
 from app.agents.types import AgentExecutionMetadata
 from app.core.logging import logger
 from app.providers.model_provider import ModelProvider
+from app.providers.model_router import ModelRouter
 from app.services.conversation_service import get_or_create_conversation
 from app.services.embedding_service import EmbeddingProvider
 from app.services.memory_extractor import extract_memory
@@ -42,9 +43,11 @@ class ChatOrchestrator:
         message: str,
         model_provider: ModelProvider,
         embedding_provider: EmbeddingProvider,
+        model_router: ModelRouter | None = None,
     ) -> str:
         plan = self.planner_agent.plan(message)
         agents_invoked = [self.planner_agent.name]
+        route = None
 
         get_or_create_conversation(
             db,
@@ -97,7 +100,24 @@ class ChatOrchestrator:
             memories=memory_context.memories,
             document_chunks=knowledge_context.chunks,
         )
-        response = model_provider.generate(messages)
+        if model_router:
+            route = model_router.route(plan, message)
+            collaboration_analyses = model_router.collaborate(route, messages)
+            if collaboration_analyses:
+                messages = messages + [
+                    {
+                        "role": "system",
+                        "content": (
+                            "Additional model analyses for synthesis:\n"
+                            + "\n\n".join(collaboration_analyses)
+                        ),
+                    }
+                ]
+            response = model_router.generate_with_fallback(route, messages)
+            selected_provider = route.provider
+        else:
+            response = model_provider.generate(messages)
+            selected_provider = model_provider
 
         evaluation = self.evaluator_agent.evaluate_context(
             plan=plan,
@@ -119,9 +139,21 @@ class ChatOrchestrator:
             selected_intent=plan.intent.value,
             agents_invoked=agents_invoked,
             retrieval_count=len(knowledge_context.chunks),
-            provider=model_provider.provider_name,
-            model=model_provider.generation_model,
+            provider=selected_provider.provider_name,
+            model=selected_provider.generation_model,
             evaluation_warnings=evaluation.warnings,
+            selected_provider=selected_provider.provider_name,
+            selected_model=selected_provider.generation_model,
+            preferred_provider=(
+                route.preferred_provider if route else selected_provider.provider_name
+            ),
+            fallback_events=[
+                fallback.__dict__ for fallback in route.fallback_events
+            ] if route else [],
+            providers_invoked=(
+                route.providers_invoked if route else [selected_provider.provider_name]
+            ),
+            collaboration_mode_used=route.collaboration_mode if route else False,
         )
         logger.info(
             "Chat orchestration completed",

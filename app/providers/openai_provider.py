@@ -1,6 +1,10 @@
 from app.config import settings
 from app.core.embedding import DEFAULT_EMBEDDING_MODEL
-from app.providers.model_provider import ModelProvider
+from app.providers.model_provider import (
+    ModelCapabilities,
+    ModelProvider,
+    ProviderAvailabilityError,
+)
 
 
 DEFAULT_GENERATION_MODEL = "gpt-4.1-mini"
@@ -8,17 +12,37 @@ DEFAULT_GENERATION_MODEL = "gpt-4.1-mini"
 
 class OpenAIModelProvider(ModelProvider):
     provider_name = "openai"
-    generation_model = DEFAULT_GENERATION_MODEL
-    embedding_model = DEFAULT_EMBEDDING_MODEL
+
+    @property
+    def generation_model(self) -> str:
+        return settings.OPENAI_MODEL or DEFAULT_GENERATION_MODEL
+
+    @property
+    def embedding_model(self) -> str:
+        return settings.OPENAI_EMBEDDING_MODEL or DEFAULT_EMBEDDING_MODEL
+
+    @property
+    def capabilities(self) -> ModelCapabilities:
+        return ModelCapabilities(
+            structured_output=True,
+            embeddings=True,
+            long_context=True,
+        )
+
+    @property
+    def is_configured(self) -> bool:
+        return bool(settings.OPENAI_API_KEY)
 
     def _get_client(self):
         try:
             from openai import OpenAI
         except ImportError as exc:
-            raise RuntimeError("The openai package is not installed") from exc
+            raise ProviderAvailabilityError(
+                "The openai package is not installed"
+            ) from exc
 
         if not settings.OPENAI_API_KEY:
-            raise RuntimeError("OPENAI_API_KEY is not configured")
+            raise ProviderAvailabilityError("OPENAI_API_KEY is not configured")
 
         return OpenAI(api_key=settings.OPENAI_API_KEY)
 

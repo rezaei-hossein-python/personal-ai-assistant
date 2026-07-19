@@ -1,4 +1,20 @@
 from abc import ABC, abstractmethod
+from dataclasses import dataclass, field
+
+
+class ProviderAvailabilityError(RuntimeError):
+    pass
+
+
+@dataclass(frozen=True)
+class ModelCapabilities:
+    text_generation: bool = True
+    structured_output: bool = False
+    embeddings: bool = False
+    long_context: bool = False
+    multimodal: bool = False
+    realtime_context: bool = False
+    metadata: dict = field(default_factory=dict)
 
 
 class ModelProvider(ABC):
@@ -13,9 +29,16 @@ class ModelProvider(ABC):
         raise NotImplementedError
 
     @property
-    @abstractmethod
     def embedding_model(self) -> str:
-        raise NotImplementedError
+        return ""
+
+    @property
+    def capabilities(self) -> ModelCapabilities:
+        return ModelCapabilities()
+
+    @property
+    def is_configured(self) -> bool:
+        return True
 
     @abstractmethod
     def generate(self, messages: list[dict]) -> str:
@@ -29,6 +52,7 @@ class ModelProvider(ABC):
     ) -> str:
         raise NotImplementedError
 
-    @abstractmethod
     def embed_text(self, text: str) -> list[float]:
-        raise NotImplementedError
+        raise ProviderAvailabilityError(
+            f"{self.provider_name} does not provide embeddings"
+        )

@@ -52,3 +52,9 @@ class AgentExecutionMetadata:
     provider: str
     model: str
     evaluation_warnings: list[str]
+    selected_provider: str = ""
+    selected_model: str = ""
+    preferred_provider: str = ""
+    fallback_events: list[dict] = field(default_factory=list)
+    providers_invoked: list[str] = field(default_factory=list)
+    collaboration_mode_used: bool = False

@@ -6,6 +6,7 @@ from app.database.database import get_db
 from app.models.user import User
 from app.orchestrators.chat_orchestrator import ChatOrchestrator
 from app.providers.model_provider import ModelProvider
+from app.providers.model_router import ModelRouter
 from app.providers.openai_provider import OpenAIModelProvider
 from app.services.auth_service import decode_access_token
 from app.services.embedding_service import EmbeddingProvider, get_embedding_provider
@@ -49,6 +50,10 @@ def get_current_embedding_provider() -> EmbeddingProvider:
 
 def get_current_model_provider() -> ModelProvider:
     return OpenAIModelProvider()
+
+
+def get_model_router() -> ModelRouter:
+    return ModelRouter()
 
 
 def get_chat_orchestrator() -> ChatOrchestrator:

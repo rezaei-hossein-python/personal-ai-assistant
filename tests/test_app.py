@@ -12,10 +12,12 @@ from app.dependencies import (
     get_chat_orchestrator,
     get_current_embedding_provider,
     get_current_model_provider,
+    get_model_router,
 )
 from app.main import app
 from app.models.document_chunk import DocumentChunk
-from app.providers.model_provider import ModelProvider
+from app.providers.model_provider import ModelProvider, ProviderAvailabilityError
+from app.providers.model_router import ModelRouter
 from app.orchestrators.chat_orchestrator import ChatOrchestrator
 from app.services.embedding_service import EmbeddingProvider
 from app.services.embedding_backfill_service import backfill_missing_chunk_embeddings
@@ -23,7 +25,7 @@ from app.services.chunking_service import chunk_text
 from app.services.retrieval_service import RetrievedChunk
 from app.services.text_extraction_service import extract_text
 from app.agents.planner_agent import PlannerAgent
-from app.agents.types import Intent
+from app.agents.types import Intent, Plan
 
 
 class FakeEmbeddingProvider(EmbeddingProvider):
@@ -59,6 +61,60 @@ class FakeModelProvider(ModelProvider):
         return FakeEmbeddingProvider().embed_text(text)
 
 
+class FakeProvider(FakeModelProvider):
+    def __init__(
+        self,
+        provider_name: str,
+        generation_model: str,
+        configured: bool = True,
+        should_fail: bool = False,
+        response: str | None = None,
+    ):
+        self._provider_name = provider_name
+        self._generation_model = generation_model
+        self._configured = configured
+        self.should_fail = should_fail
+        self.response = response or f"{provider_name} response"
+        self.last_messages = []
+
+    @property
+    def provider_name(self) -> str:
+        return self._provider_name
+
+    @property
+    def generation_model(self) -> str:
+        return self._generation_model
+
+    @property
+    def is_configured(self) -> bool:
+        return self._configured
+
+    def generate(self, messages: list[dict]) -> str:
+        if self.should_fail:
+            raise ProviderAvailabilityError(f"{self.provider_name} unavailable")
+        self.last_messages = messages
+        return self.response
+
+
+def fake_model_router(
+    providers: list[ModelProvider] | None = None,
+    collaboration_enabled: bool = False,
+) -> ModelRouter:
+    configured_providers = providers or [FakeModelProvider()]
+    return ModelRouter(
+        providers=configured_providers,
+        default_provider_name=configured_providers[0].provider_name,
+        collaboration_enabled=collaboration_enabled,
+    )
+
+
+def override_model_provider(provider: ModelProvider) -> None:
+    app.dependency_overrides[get_current_model_provider] = lambda: provider
+    app.dependency_overrides[get_model_router] = (
+        lambda: fake_model_router(providers=[provider])
+    )
+
+
 @pytest.fixture(autouse=True)
 def reset_database():
     Base.metadata.drop_all(bind=engine)
@@ -75,6 +131,7 @@ def client():
     app.dependency_overrides[get_current_model_provider] = (
         lambda: FakeModelProvider()
     )
+    app.dependency_overrides[get_model_router] = lambda: fake_model_router()
     with TestClient(app) as test_client:
         yield test_client
     app.dependency_overrides.clear()
@@ -205,6 +262,113 @@ def test_planner_routing():
     )
 
 
+def test_model_router_uses_openai_default():
+    openai = FakeProvider("openai", "gpt-test")
+    router = fake_model_router(providers=[openai])
+
+    route = router.route(
+        Plan(intent=Intent.GENERAL_CHAT, use_memory=True, use_knowledge=False),
+        "Hello",
+    )
+
+    assert route.provider.provider_name == "openai"
+    assert route.fallback_events == []
+
+
+def test_model_router_routes_document_analysis_to_claude():
+    openai = FakeProvider("openai", "gpt-test")
+    claude = FakeProvider("anthropic", "claude-test")
+    router = fake_model_router(providers=[openai, claude])
+
+    route = router.route(
+        Plan(intent=Intent.KNOWLEDGE_SEARCH, use_memory=False, use_knowledge=True),
+        "Search my documents",
+    )
+
+    assert route.provider.provider_name == "anthropic"
+
+
+def test_model_router_routes_multimodal_to_gemini():
+    openai = FakeProvider("openai", "gpt-test")
+    gemini = FakeProvider("gemini", "gemini-test")
+    router = fake_model_router(providers=[openai, gemini])
+
+    route = router.route(
+        Plan(intent=Intent.GENERAL_CHAT, use_memory=True, use_knowledge=False),
+        "Analyze this screenshot",
+    )
+
+    assert route.provider.provider_name == "gemini"
+
+
+def test_model_router_routes_realtime_context_to_grok():
+    openai = FakeProvider("openai", "gpt-test")
+    grok = FakeProvider("xai", "grok-test")
+    router = fake_model_router(providers=[openai, grok])
+
+    route = router.route(
+        Plan(intent=Intent.GENERAL_CHAT, use_memory=True, use_knowledge=False),
+        "What is the latest social context?",
+    )
+
+    assert route.provider.provider_name == "xai"
+
+
+def test_model_router_falls_back_when_preferred_unconfigured():
+    openai = FakeProvider("openai", "gpt-test")
+    claude = FakeProvider("anthropic", "claude-test", configured=False)
+    router = fake_model_router(providers=[openai, claude])
+
+    route = router.route(
+        Plan(intent=Intent.KNOWLEDGE_SEARCH, use_memory=False, use_knowledge=True),
+        "Search my documents",
+    )
+
+    assert route.provider.provider_name == "openai"
+    assert route.fallback_events[0].from_provider == "anthropic"
+
+
+def test_model_router_falls_back_on_provider_error():
+    openai = FakeProvider("openai", "gpt-test")
+    claude = FakeProvider("anthropic", "claude-test", should_fail=True)
+    router = fake_model_router(providers=[openai, claude])
+    route = router.route(
+        Plan(intent=Intent.KNOWLEDGE_SEARCH, use_memory=False, use_knowledge=True),
+        "Search my documents",
+    )
+
+    response = router.generate_with_fallback(
+        route,
+        [{"role": "user", "content": "hello"}],
+    )
+
+    assert response == "openai response"
+    assert route.provider.provider_name == "openai"
+    assert route.fallback_events[0].reason == "anthropic unavailable"
+
+
+def test_model_router_collaboration_mode():
+    openai = FakeProvider("openai", "gpt-test")
+    claude = FakeProvider("anthropic", "claude-test")
+    router = fake_model_router(
+        providers=[openai, claude],
+        collaboration_enabled=True,
+    )
+
+    route = router.route(
+        Plan(intent=Intent.COMBINED_CONTEXT, use_memory=True, use_knowledge=True),
+        "Use my documents and preferences",
+    )
+    analyses = router.collaborate(
+        route,
+        [{"role": "user", "content": "hello"}],
+    )
+
+    assert route.collaboration_mode is True
+    assert analyses == ["anthropic response"]
+    assert "anthropic" in route.providers_invoked
+
+
 def test_chat_flow_persists_messages_and_memory(monkeypatch, client):
     token = register_and_login(client)
 
@@ -295,9 +459,7 @@ def test_chat_history_isolated_for_same_conversation_id(monkeypatch, client):
             observed_histories.append(messages)
             return "ok"
 
-    app.dependency_overrides[get_current_model_provider] = (
-        lambda: ObservingModelProvider()
-    )
+    override_model_provider(ObservingModelProvider())
 
     client.post(
         "/chat",
@@ -562,9 +724,7 @@ def test_chat_includes_retrieved_document_context(monkeypatch, client):
             observed_document_chunks.extend(messages)
             return "Used document context."
 
-    app.dependency_overrides[get_current_model_provider] = (
-        lambda: ObservingModelProvider()
-    )
+    override_model_provider(ObservingModelProvider())
 
     response = client.post(
         "/chat",
@@ -606,9 +766,7 @@ def test_orchestrator_memory_only_request(monkeypatch, client):
             observed_messages.extend(messages)
             return "memory-only"
 
-    app.dependency_overrides[get_current_model_provider] = (
-        lambda: ObservingModelProvider()
-    )
+    override_model_provider(ObservingModelProvider())
 
     response = client.post(
         "/chat",
@@ -637,9 +795,7 @@ def test_orchestrator_knowledge_only_request(monkeypatch, client):
             observed_messages.extend(messages)
             return "knowledge-only"
 
-    app.dependency_overrides[get_current_model_provider] = (
-        lambda: ObservingModelProvider()
-    )
+    override_model_provider(ObservingModelProvider())
     client.post(
         "/documents/upload",
         headers=auth_headers(token),
@@ -740,9 +896,7 @@ def test_orchestrator_user_isolation(monkeypatch, client):
             observed_messages.append(messages)
             return "ok"
 
-    app.dependency_overrides[get_current_model_provider] = (
-        lambda: ObservingModelProvider()
-    )
+    override_model_provider(ObservingModelProvider())
     client.post(
         "/memories",
         headers=auth_headers(first_token),
