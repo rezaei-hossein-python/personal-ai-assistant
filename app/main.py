@@ -1,36 +1,27 @@
 from fastapi import FastAPI
 
-from app.config import settings
-from app.core.logging import logger, setup_logging
-from app.routers.health import router as health_router
 from app.routers.chat import router as chat_router
-
-from app.database.database import engine, Base
-from app.models import conversation, message
-
-
-setup_logging()
-
-Base.metadata.create_all(bind=engine)
+from app.routers.memories import router as memories_router
 
 
 app = FastAPI(
-    title=settings.APP_NAME,
-    version=settings.APP_VERSION,
-    description="An AI-powered personal knowledge management system"
+    title="Personal AI Assistant",
+    version="0.1.0",
+    description="An AI-powered personal knowledge management system",
 )
 
 
-app.include_router(health_router)
-app.include_router(chat_router)
+@app.get("/health")
+def health_check():
+    return {"status": "healthy"}
 
 
 @app.get("/")
 def home():
-    logger.info("Home endpoint accessed")
-
     return {
-        "message": "Personal AI Assistant API is running",
-        "application": settings.APP_NAME,
-        "version": settings.APP_VERSION
+        "message": "Personal AI Assistant API is running"
     }
+
+
+app.include_router(chat_router)
+app.include_router(memories_router)

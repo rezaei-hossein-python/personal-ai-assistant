@@ -10,6 +10,22 @@ def save_memory(
     key: str,
     value: str,
 ):
+    existing = (
+        db.query(Memory)
+        .filter(
+            Memory.user_id == user_id,
+            Memory.key == key,
+        )
+        .first()
+    )
+
+    if existing:
+        existing.value = value
+        existing.category = category
+        db.commit()
+        db.refresh(existing)
+        return existing
+
     memory = Memory(
         user_id=user_id,
         category=category,
@@ -30,27 +46,26 @@ def get_memories(
 ):
     return (
         db.query(Memory)
-        .filter(
-            Memory.user_id == user_id
-        )
-        .order_by(
-            Memory.created_at.desc()
-        )
+        .filter(Memory.user_id == user_id)
+        .order_by(Memory.created_at.desc())
         .all()
     )
 
 
-def format_memories(
-    memories: list,
+def delete_memory(
+    db: Session,
+    memory_id: int,
 ):
-    if not memories:
-        return ""
+    memory = (
+        db.query(Memory)
+        .filter(Memory.id == memory_id)
+        .first()
+    )
 
-    formatted = []
+    if not memory:
+        return False
 
-    for memory in memories:
-        formatted.append(
-            f"{memory.key}: {memory.value}"
-        )
+    db.delete(memory)
+    db.commit()
 
-    return "\n".join(formatted)
+    return True
