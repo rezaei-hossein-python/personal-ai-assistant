@@ -4,8 +4,11 @@ os.environ["APP_ENV"] = "test"
 os.environ["DATABASE_URL"] = "sqlite:///./test_assistant.db"
 os.environ["OPENAI_API_KEY"] = "test-key"
 
-import pytest
 from fastapi.testclient import TestClient
+
+import pytest
+from sqlalchemy import inspect, text
+from sqlalchemy.exc import IntegrityError
 
 from app.database.database import Base, SessionLocal, engine
 from app.dependencies import (
@@ -15,7 +18,10 @@ from app.dependencies import (
     get_model_router,
 )
 from app.main import app
+from app.models.conversation import Conversation
 from app.models.document_chunk import DocumentChunk
+from app.models.message import Message
+from app.models.user import User
 from app.providers.model_provider import ModelProvider, ProviderAvailabilityError
 from app.providers.model_router import ModelRouter
 from app.orchestrators.chat_orchestrator import ChatOrchestrator
@@ -487,6 +493,128 @@ def test_chat_history_isolated_for_same_conversation_id(monkeypatch, client):
         "role": "user",
         "content": "Second user's message",
     } in observed_histories[1]
+
+
+def test_conversation_message_orm_navigation(monkeypatch, client):
+    token = register_and_login(client)
+
+    monkeypatch.setattr(
+        "app.orchestrators.chat_orchestrator.extract_memory",
+        lambda message: '{"remember": false}',
+    )
+
+    response = client.post(
+        "/chat",
+        headers=auth_headers(token),
+        json={
+            "conversation_id": "orm-navigation",
+            "message": "Persist this.",
+        },
+    )
+
+    assert response.status_code == 200
+
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.email == "user@example.com").one()
+        conversation = db.query(Conversation).filter(
+            Conversation.user_id == user.id,
+            Conversation.conversation_id == "orm-navigation",
+        ).one()
+
+        assert conversation.user == user
+        assert conversation in user.conversations
+        assert [message.role for message in conversation.messages] == [
+            "user",
+            "assistant",
+        ]
+        assert conversation.messages[0].conversation == conversation
+        assert conversation.messages[0] in user.messages
+    finally:
+        db.close()
+
+
+def test_conversation_message_schema_constraints_exist(client):
+    inspector = inspect(engine)
+
+    conversation_unique_constraints = {
+        tuple(constraint["column_names"])
+        for constraint in inspector.get_unique_constraints("conversations")
+    }
+    message_foreign_keys = {
+        (
+            tuple(foreign_key["constrained_columns"]),
+            foreign_key["referred_table"],
+            tuple(foreign_key["referred_columns"]),
+        )
+        for foreign_key in inspector.get_foreign_keys("messages")
+    }
+    conversation_foreign_keys = {
+        (
+            tuple(foreign_key["constrained_columns"]),
+            foreign_key["referred_table"],
+            tuple(foreign_key["referred_columns"]),
+        )
+        for foreign_key in inspector.get_foreign_keys("conversations")
+    }
+
+    assert ("user_id", "conversation_id") in conversation_unique_constraints
+    assert (("user_id",), "users", ("id",)) in conversation_foreign_keys
+    assert (("user_id",), "users", ("id",)) in message_foreign_keys
+    assert (
+        ("user_id", "conversation_id"),
+        "conversations",
+        ("user_id", "conversation_id"),
+    ) in message_foreign_keys
+
+
+def test_conversation_message_database_constraints(client):
+    token = register_and_login(client)
+
+    client.post(
+        "/chat",
+        headers=auth_headers(token),
+        json={
+            "conversation_id": "constraint-check",
+            "message": "Create a valid conversation.",
+        },
+    )
+
+    db = SessionLocal()
+    try:
+        db.execute(text("PRAGMA foreign_keys=ON"))
+        first_user = db.query(User).filter(User.email == "user@example.com").one()
+        second_user = User(
+            email="second@example.com",
+            name="Second User",
+            hashed_password="hash",
+        )
+        db.add(second_user)
+        db.commit()
+
+        db.add(
+            Conversation(
+                conversation_id="constraint-check",
+                user_id=first_user.id,
+            )
+        )
+        with pytest.raises(IntegrityError):
+            db.commit()
+        db.rollback()
+
+        db.add(
+            Message(
+                conversation_id="constraint-check",
+                user_id=second_user.id,
+                role="user",
+                content="This should not attach to another user's conversation.",
+            )
+        )
+        with pytest.raises(IntegrityError):
+            db.commit()
+        db.rollback()
+    finally:
+        db.close()
 
 
 def test_text_extraction_and_chunking_for_markdown():
