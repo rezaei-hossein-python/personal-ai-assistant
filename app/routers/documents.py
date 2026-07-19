@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from sqlalchemy.orm import Session
 
 from app.database.database import get_db
-from app.dependencies import get_current_user
+from app.dependencies import get_current_embedding_provider, get_current_user
 from app.models.document import Document
 from app.models.user import User
 from app.schemas.document import (
@@ -16,6 +16,7 @@ from app.services.document_service import (
     get_document,
     list_documents,
 )
+from app.services.embedding_service import EmbeddingProvider
 from app.services.retrieval_service import (
     VectorSearchUnavailableError,
     retrieve_relevant_chunks,
@@ -43,6 +44,7 @@ async def upload_document(
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    embedding_provider: EmbeddingProvider = Depends(get_current_embedding_provider),
 ):
     file_bytes = await file.read()
     if not file_bytes:
@@ -57,6 +59,7 @@ async def upload_document(
         filename=file.filename or "document",
         content_type=file.content_type or "application/octet-stream",
         file_bytes=file_bytes,
+        embedding_provider=embedding_provider,
     )
     return document_response(document)
 
@@ -103,6 +106,7 @@ def search_my_documents(
     request: SearchRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    embedding_provider: EmbeddingProvider = Depends(get_current_embedding_provider),
 ):
     try:
         chunks = retrieve_relevant_chunks(
@@ -110,6 +114,7 @@ def search_my_documents(
             user_id=current_user.id,
             query=request.query,
             limit=request.limit,
+            embedding_provider=embedding_provider,
         )
     except VectorSearchUnavailableError as exc:
         raise HTTPException(

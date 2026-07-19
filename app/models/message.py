@@ -1,7 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text
-from sqlalchemy.orm import relationship
+from sqlalchemy import Column, DateTime, Integer, String, Text
 
 from app.database.database import Base
 
@@ -13,7 +12,6 @@ class Message(Base):
 
     conversation_id = Column(
         String,
-        ForeignKey("conversations.conversation_id", ondelete="CASCADE"),
         nullable=False,
         index=True
     )
@@ -37,10 +35,4 @@ class Message(Base):
     created_at = Column(
         DateTime,
         default=datetime.utcnow
-    )
-
-    conversation = relationship(
-        "Conversation",
-        back_populates="messages",
-        primaryjoin="Message.conversation_id == Conversation.conversation_id",
     )

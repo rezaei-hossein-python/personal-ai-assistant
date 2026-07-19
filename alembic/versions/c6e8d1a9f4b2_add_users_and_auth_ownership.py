@@ -20,19 +20,76 @@ depends_on: Union[str, Sequence[str], None] = None
 def upgrade() -> None:
     """Upgrade schema."""
     bind = op.get_bind()
+    inspector = sa.inspect(bind)
+
+    conversation_columns = {
+        column["name"]
+        for column in inspector.get_columns("conversations")
+    }
+    if "user_id" not in conversation_columns:
+        op.add_column(
+            "conversations",
+            sa.Column("user_id", sa.Integer(), nullable=True),
+        )
+        op.create_index(
+            op.f("ix_conversations_user_id"),
+            "conversations",
+            ["user_id"],
+            unique=False,
+        )
+
+    if "title" not in conversation_columns:
+        op.add_column(
+            "conversations",
+            sa.Column(
+                "title",
+                sa.String(),
+                nullable=False,
+                server_default="New Conversation",
+            ),
+        )
+        op.alter_column("conversations", "title", server_default=None)
+
+    message_columns = {
+        column["name"]
+        for column in inspector.get_columns("messages")
+    }
+    if "user_id" not in message_columns:
+        op.add_column(
+            "messages",
+            sa.Column("user_id", sa.Integer(), nullable=True),
+        )
+        op.create_index(
+            op.f("ix_messages_user_id"),
+            "messages",
+            ["user_id"],
+            unique=False,
+        )
+
     if bind.dialect.name == "postgresql":
         op.execute(
             "ALTER TABLE conversations "
             "DROP CONSTRAINT IF EXISTS conversations_conversation_id_key"
         )
+        op.execute("DROP INDEX IF EXISTS ix_conversations_conversation_id")
+        op.create_index(
+            op.f('ix_conversations_conversation_id'),
+            'conversations',
+            ['conversation_id'],
+            unique=False
+        )
+    else:
+        op.drop_index(
+            op.f('ix_conversations_conversation_id'),
+            table_name='conversations'
+        )
+        op.create_index(
+            op.f('ix_conversations_conversation_id'),
+            'conversations',
+            ['conversation_id'],
+            unique=False
+        )
 
-    op.drop_index(op.f('ix_conversations_conversation_id'), table_name='conversations')
-    op.create_index(
-        op.f('ix_conversations_conversation_id'),
-        'conversations',
-        ['conversation_id'],
-        unique=False
-    )
     op.create_index(
         'ix_conversations_user_conversation_id',
         'conversations',
@@ -47,8 +104,7 @@ def upgrade() -> None:
         sa.Column('name', sa.String(length=255), nullable=False),
         sa.Column('hashed_password', sa.String(length=255), nullable=False),
         sa.Column('created_at', sa.DateTime(), nullable=True),
-        sa.PrimaryKeyConstraint('id'),
-        sa.UniqueConstraint('email')
+        sa.PrimaryKeyConstraint('id')
     )
     op.create_index(op.f('ix_users_email'), 'users', ['email'], unique=True)
     op.create_index(op.f('ix_users_id'), 'users', ['id'], unique=False)

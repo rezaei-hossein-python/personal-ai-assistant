@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.core.logging import logger
 from app.database.database import get_db
-from app.dependencies import get_current_user
+from app.dependencies import get_current_embedding_provider, get_current_user
 from app.models.user import User
 
 from app.schemas.chat import (
@@ -29,6 +29,7 @@ from app.services.memory_service import (
 from app.services.memory_extractor import (
     extract_memory,
 )
+from app.services.embedding_service import EmbeddingProvider
 from app.services.retrieval_service import (
     VectorSearchUnavailableError,
     retrieve_relevant_chunks,
@@ -46,6 +47,7 @@ def chat(
     request: ChatRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    embedding_provider: EmbeddingProvider = Depends(get_current_embedding_provider),
 ):
 
     logger.info(
@@ -116,6 +118,7 @@ def chat(
             db=db,
             user_id=current_user.id,
             query=request.message,
+            embedding_provider=embedding_provider,
         )
     except VectorSearchUnavailableError:
         document_chunks = []

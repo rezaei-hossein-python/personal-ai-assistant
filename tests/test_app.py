@@ -8,11 +8,23 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.database.database import Base, SessionLocal, engine
+from app.dependencies import get_current_embedding_provider
 from app.main import app
 from app.models.document_chunk import DocumentChunk
+from app.services.embedding_service import EmbeddingProvider
 from app.services.chunking_service import chunk_text
 from app.services.retrieval_service import RetrievedChunk
 from app.services.text_extraction_service import extract_text
+
+
+class FakeEmbeddingProvider(EmbeddingProvider):
+    def embed_text(self, text: str) -> list[float]:
+        lowered = text.lower()
+        if "architecture" in lowered:
+            return [1.0, 0.0, 0.0]
+        if "recipe" in lowered:
+            return [0.0, 1.0, 0.0]
+        return [0.0, 0.0, 1.0]
 
 
 @pytest.fixture(autouse=True)
@@ -25,8 +37,12 @@ def reset_database():
 
 @pytest.fixture
 def client():
+    app.dependency_overrides[get_current_embedding_provider] = (
+        lambda: FakeEmbeddingProvider()
+    )
     with TestClient(app) as test_client:
         yield test_client
+    app.dependency_overrides.clear()
 
 
 def test_application_startup(client):
@@ -379,7 +395,84 @@ def test_document_delete_cascades_chunks(client):
     assert chunk_count_after_delete == 0
 
 
-def test_semantic_retrieval_reports_pgvector_unavailable(client):
+def test_semantic_retrieval_returns_relevant_chunks(client):
+    token = register_and_login(client)
+    client.post(
+        "/documents/upload",
+        headers=auth_headers(token),
+        files={
+            "file": (
+                "architecture.txt",
+                b"System architecture and database design notes.",
+                "text/plain",
+            )
+        },
+    )
+    client.post(
+        "/documents/upload",
+        headers=auth_headers(token),
+        files={
+            "file": (
+                "recipe.txt",
+                b"Recipe notes about soup and vegetables.",
+                "text/plain",
+            )
+        },
+    )
+
+    response = client.post(
+        "/documents/search",
+        headers=auth_headers(token),
+        json={
+            "query": "architecture",
+            "limit": 3,
+        },
+    )
+
+    assert response.status_code == 200
+    results = response.json()
+    assert len(results) == 2
+    assert results[0]["document_name"] == "architecture.txt"
+    assert "architecture" in results[0]["content"].lower()
+
+
+def test_semantic_retrieval_is_scoped_to_user(client):
+    first_token = register_and_login(
+        client,
+        email="first@example.com",
+        name="First User",
+    )
+    second_token = register_and_login(
+        client,
+        email="second@example.com",
+        name="Second User",
+    )
+    client.post(
+        "/documents/upload",
+        headers=auth_headers(first_token),
+        files={
+            "file": (
+                "private-architecture.txt",
+                b"Private architecture notes.",
+                "text/plain",
+            )
+        },
+    )
+
+    response = client.post(
+        "/documents/search",
+        headers=auth_headers(second_token),
+        json={
+            "query": "architecture",
+            "limit": 3,
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+def test_semantic_retrieval_empty_results(client):
     token = register_and_login(client)
 
     response = client.post(
@@ -391,8 +484,8 @@ def test_semantic_retrieval_reports_pgvector_unavailable(client):
         },
     )
 
-    assert response.status_code == 503
-    assert "pgvector" in response.json()["detail"]
+    assert response.status_code == 200
+    assert response.json() == []
 
 
 def test_chat_includes_retrieved_document_context(monkeypatch, client):
@@ -405,7 +498,7 @@ def test_chat_includes_retrieved_document_context(monkeypatch, client):
     )
     monkeypatch.setattr(
         "app.routers.chat.retrieve_relevant_chunks",
-        lambda db, user_id, query: [
+        lambda db, user_id, query, embedding_provider: [
             RetrievedChunk(
                 document_id=1,
                 document_name="notes.txt",

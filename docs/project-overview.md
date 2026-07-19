@@ -11,11 +11,11 @@ Personal AI Assistant is being developed into a modular personal AI operating sy
 - SQLAlchemy models for users, conversations, messages, memories, documents, and document chunks
 - Alembic migrations for database schema management
 - PostgreSQL as the expected runtime database
-- pgvector required for semantic document search
+- pgvector-backed semantic document search
 - JWT bearer-token authentication
 - User-owned conversations, memories, and documents
 - PDF, DOCX, TXT, and Markdown text extraction
-- Reusable text chunking prepared for embeddings
+- Reusable text chunking with OpenAI embeddings stored as pgvector vectors
 - OpenAI Responses API integration for chat and memory extraction
 
 ## Current Request Flow
@@ -30,7 +30,7 @@ POST /chat
   save or update memory
   load message history
   load user memories
-  retrieve relevant user document chunks when vector search is available
+  retrieve relevant user document chunks with pgvector cosine search
   call OpenAI
   save assistant message
   return response
@@ -87,7 +87,7 @@ POST /documents/upload
 
 Future phases will add:
 
-- pgvector-backed embeddings and semantic retrieval once the extension is available
+- embedding backfill for documents uploaded before Phase 3.1
 - Richer long-term memory modeling
 - Multi-model routing
 - Agent orchestration

@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from app.models.document import Document
 from app.models.document_chunk import DocumentChunk
 from app.services.chunking_service import chunk_text
+from app.services.embedding_service import EmbeddingProvider, get_embedding_provider
 from app.services.text_extraction_service import TextExtractionError, extract_text
 
 
@@ -12,6 +13,7 @@ def create_document_from_upload(
     filename: str,
     content_type: str,
     file_bytes: bytes,
+    embedding_provider: EmbeddingProvider | None = None,
 ) -> Document:
     document = Document(
         user_id=user_id,
@@ -42,13 +44,16 @@ def create_document_from_upload(
             document.processing_status = "failed"
             document.error_message = "No extractable text found"
         else:
+            provider = embedding_provider or get_embedding_provider()
             for chunk in chunks:
+                embedding = provider.embed_text(chunk.content)
                 db.add(
                     DocumentChunk(
                         document_id=document.id,
                         chunk_index=chunk.chunk_index,
                         content=chunk.content,
                         chunk_metadata=chunk.metadata,
+                        embedding=embedding,
                     )
                 )
             document.processing_status = "completed"
@@ -61,6 +66,13 @@ def create_document_from_upload(
     except TextExtractionError as exc:
         document.processing_status = "failed"
         document.error_message = str(exc)
+        document.document_metadata = {}
+        db.commit()
+        db.refresh(document)
+        return document
+    except Exception as exc:
+        document.processing_status = "failed"
+        document.error_message = f"Failed to generate embeddings: {exc}"
         document.document_metadata = {}
         db.commit()
         db.refresh(document)

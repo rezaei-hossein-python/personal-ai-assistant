@@ -1,10 +1,7 @@
 from abc import ABC, abstractmethod
 
 from app.config import settings
-
-
-EMBEDDING_DIMENSION = 1536
-DEFAULT_EMBEDDING_MODEL = "text-embedding-3-small"
+from app.core.embedding import DEFAULT_EMBEDDING_MODEL, EMBEDDING_DIMENSION
 
 
 class EmbeddingProvider(ABC):

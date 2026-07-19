@@ -79,7 +79,7 @@ DATABASE_URL=postgresql+psycopg2://username:password@localhost:5432/personal_ai
 
 PostgreSQL is the expected database. SQLite is only supported for tests with `APP_ENV=test`.
 
-Semantic document search requires PostgreSQL with the `vector` extension available. If pgvector is not installed, document upload, parsing, chunking, listing, metadata retrieval, and deletion still work, but semantic retrieval returns a clear `503` response.
+Semantic document search requires PostgreSQL with the `vector` extension available. Phase 3.1 enables pgvector-backed storage with `document_chunks.embedding vector(1536)` and cosine similarity retrieval.
 
 ## Database Migrations
 
@@ -185,7 +185,7 @@ curl -X DELETE http://127.0.0.1:8000/documents/1 \
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
 ```
 
-Search documents when pgvector is available:
+Search documents:
 
 ```bash
 curl -X POST http://127.0.0.1:8000/documents/search \
@@ -206,6 +206,8 @@ Authenticated chat request
 ```
 
 Document chunk metadata keeps source document and chunk identifiers so later frontend citations can point back to the relevant source.
+
+Documents uploaded after Phase 3.1 receive embeddings during ingestion. Documents uploaded before the embedding column existed may need to be re-uploaded or backfilled before they appear in semantic search results.
 
 ## Testing
 
