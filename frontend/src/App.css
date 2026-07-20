@@ -105,6 +105,184 @@ body {
   box-shadow: 0 18px 45px rgb(40 49 65 / 10%);
 }
 
+.knowledge-panel {
+  display: grid;
+  gap: 12px;
+  padding: 14px 16px;
+  border-bottom: 1px solid #dfe3ea;
+  background: #fbfcfe;
+}
+
+.knowledge-panel__controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: end;
+}
+
+.document-upload {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
+}
+
+.document-upload__label,
+.knowledge-mode span {
+  color: #3c4043;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.document-upload__controls {
+  display: flex;
+  min-width: 0;
+  gap: 8px;
+  align-items: center;
+}
+
+.document-upload input {
+  min-width: 0;
+  flex: 1;
+  font: inherit;
+}
+
+.document-upload button,
+.knowledge-mode select {
+  min-height: 34px;
+  border: 1px solid #c9d1dd;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #202124;
+  font: inherit;
+}
+
+.document-upload button {
+  flex: 0 0 auto;
+  padding: 0 12px;
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.document-upload button:disabled,
+.document-upload input:disabled,
+.knowledge-mode select:disabled {
+  background: #f1f3f6;
+  color: #6f7782;
+  cursor: not-allowed;
+}
+
+.document-upload__hint,
+.document-list__empty {
+  margin: 0;
+  color: #6f7782;
+  font-size: 0.82rem;
+}
+
+.document-error {
+  margin: 0;
+  color: #b3261e;
+  font-size: 0.84rem;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.knowledge-mode {
+  display: grid;
+  min-width: 132px;
+  gap: 6px;
+}
+
+.knowledge-mode select {
+  padding: 0 10px;
+}
+
+.document-list {
+  display: grid;
+  gap: 8px;
+}
+
+.document-list__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.document-list h2 {
+  margin: 0;
+  font-size: 0.9rem;
+}
+
+.document-list__header span {
+  color: #6f7782;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.document-list ul {
+  display: grid;
+  max-height: 118px;
+  gap: 6px;
+  padding: 0;
+  margin: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.document-list__item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: start;
+  padding: 8px 10px;
+  border: 1px solid #e1e6ee;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.document-list__name,
+.document-list__error {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.document-list__name {
+  color: #202124;
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+.document-list__error {
+  margin-top: 2px;
+  color: #b3261e;
+  font-size: 0.8rem;
+  line-height: 1.35;
+}
+
+.document-status {
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: #eef1f5;
+  color: #5f6368;
+  font-size: 0.74rem;
+  font-weight: 700;
+}
+
+.document-status--completed {
+  background: #e6f4ea;
+  color: #137333;
+}
+
+.document-status--failed {
+  background: #fce8e6;
+  color: #b3261e;
+}
+
+.document-status--processing {
+  background: #e8f0fe;
+  color: #174ea6;
+}
+
 .login-panel {
   display: grid;
   width: min(100%, 1040px);
@@ -264,6 +442,53 @@ body {
   overflow-wrap: anywhere;
 }
 
+.knowledge-sources {
+  display: grid;
+  gap: 7px;
+  padding-top: 10px;
+  margin-top: 10px;
+  border-top: 1px solid #dfe3ea;
+  color: #5f6368;
+  font-size: 0.82rem;
+}
+
+.knowledge-sources__title {
+  display: block;
+  margin-bottom: 5px;
+  color: #3c4043;
+  font-weight: 700;
+}
+
+.knowledge-sources ul {
+  display: grid;
+  gap: 5px;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.knowledge-sources li {
+  display: grid;
+  gap: 2px;
+}
+
+.knowledge-sources li span:first-child {
+  color: #202124;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.knowledge-sources__warning,
+.knowledge-sources__empty {
+  margin: 0;
+  line-height: 1.35;
+}
+
+.knowledge-sources__warning {
+  color: #9a6700;
+  font-weight: 700;
+}
+
 .thinking-state {
   margin: 0;
   color: #5f6368;
@@ -352,6 +577,25 @@ body {
   .message-list {
     min-height: 360px;
     padding: 16px;
+  }
+
+  .knowledge-panel__controls,
+  .document-list__item {
+    grid-template-columns: 1fr;
+  }
+
+  .document-upload__controls {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .document-upload button,
+  .knowledge-mode select {
+    min-height: 40px;
+  }
+
+  .knowledge-mode {
+    min-width: 0;
   }
 
   .login-form {

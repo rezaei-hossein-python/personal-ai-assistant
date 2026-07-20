@@ -4,7 +4,7 @@ export interface ApiRequestOptions extends Omit<RequestInit, 'body' | 'headers'>
   accessToken?: string
 }
 
-const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? '/api'
+export const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? '/api'
 
 export class ApiError extends Error {
   status: number
@@ -37,6 +37,33 @@ export async function fetchJson<TResponse>(
     ...requestOptions,
     headers: requestHeaders,
     body: body === undefined ? undefined : JSON.stringify(body),
+  })
+
+  const responseBody = await parseJsonResponse(response)
+
+  if (!response.ok) {
+    throw new ApiError(response.status, getErrorMessage(responseBody, response.status), responseBody)
+  }
+
+  return responseBody as TResponse
+}
+
+export async function fetchFormData<TResponse>(
+  path: string,
+  formData: FormData,
+  options: Omit<ApiRequestOptions, 'body'> = {},
+): Promise<TResponse> {
+  const { accessToken, headers, ...requestOptions } = options
+  const requestHeaders = new Headers(headers)
+
+  if (accessToken) {
+    requestHeaders.set('Authorization', `Bearer ${accessToken}`)
+  }
+
+  const response = await fetch(`${apiBaseUrl}${path}`, {
+    ...requestOptions,
+    headers: requestHeaders,
+    body: formData,
   })
 
   const responseBody = await parseJsonResponse(response)

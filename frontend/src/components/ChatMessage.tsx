@@ -1,4 +1,5 @@
 import type { Message } from '../api/types'
+import { KnowledgeSources } from './KnowledgeSources'
 
 interface ChatMessageProps {
   message: Message
@@ -12,6 +13,7 @@ export function ChatMessage({ message }: ChatMessageProps) {
           {message.role === 'user' ? 'You' : 'Assistant'}
         </span>
         <p>{message.content}</p>
+        {message.role === 'assistant' ? <KnowledgeSources metadata={message.metadata} /> : null}
       </div>
     </article>
   )
