@@ -2,13 +2,21 @@
 
 ## Overview
 
-Personal AI Assistant is an early-stage FastAPI backend for a modular personal AI operating system. The current system supports authenticated chat, message history, long-term memory extraction, memory management, document ingestion, RAG, lightweight agent orchestration, and deterministic multi-model provider routing.
+Personal AI Assistant is an early-stage personal AI operating system. The current system includes a frozen Backend Core v1 FastAPI API and a Phase 6 Frontend v1 React interface for authenticated chat. The backend supports authenticated chat, message history, long-term memory extraction, memory management, document ingestion, RAG, lightweight agent orchestration, and deterministic multi-model provider routing.
 
 ## Current Architecture
 
 ```text
-FastAPI
+Frontend
+  frontend/
+    React + TypeScript + Vite
+    http://localhost:5173
+    /api development proxy to Backend Core v1
+    login, backend health, chat, logout/session cleanup
+
+Backend Core v1
   app/main.py
+    http://127.0.0.1:8000
     /health
     /auth/register
     /auth/login
@@ -52,6 +60,39 @@ Models
   Document
   DocumentChunk
 ```
+
+Backend Core v1 is frozen. Phase 6 Frontend v1 integrates with the existing backend API contracts and does not require backend application changes.
+
+## Frontend V1
+
+The frontend is a React + TypeScript + Vite app in `frontend/`.
+
+```text
+frontend/src/
+  App.tsx
+  api/
+    http.ts
+    auth.ts
+    chat.ts
+    health.ts
+    types.ts
+  components/
+    LoginForm.tsx
+    ChatInput.tsx
+    ChatMessage.tsx
+```
+
+API requests are centralized through `frontend/src/api/http.ts`. The shared `fetchJson` helper JSON-encodes request bodies, parses JSON responses, attaches bearer tokens when provided, and raises `ApiError` for non-2xx responses. Endpoint-specific clients live in `auth.ts`, `chat.ts`, and `health.ts`.
+
+Vite proxies `/api` to `http://127.0.0.1:8000` during development and strips the `/api` prefix before forwarding. The frontend URL is `http://localhost:5173`.
+
+Authentication uses `POST /auth/login`. The returned access token is stored in React state only and is not persisted to local storage, session storage, or cookies. Logout clears the token, current `conversation_id`, displayed messages, errors, and pending send state. A `401` from chat performs the same session cleanup and asks the user to sign in again.
+
+Chat uses `POST /chat` with a frontend-generated `conversation_id` and message text. One `conversation_id` is created after login, kept in memory for the active session, and cleared on logout or authentication expiry.
+
+On initial app mount, the frontend calls `GET /health` and displays backend status. Network and API failures are shown as user-facing login or chat errors; non-authentication chat failures keep the visible conversation state.
+
+Frontend v1 limitations: sign-in only, no registration UI, memory-only sessions, one active in-memory conversation per login, no conversation history UI, no memories/documents UI, no streaming responses, no markdown rendering, no citations, and a health check only on initial app mount.
 
 ## Requirements
 
@@ -132,14 +173,39 @@ alembic revision --autogenerate -m "Describe change"
 
 ## Run Locally
 
+Use separate terminals for the backend and frontend.
+
+Terminal 1, backend:
+
 ```bash
+conda activate personal-ai-env
 uvicorn app.main:app --reload
+```
+
+Backend URL:
+
+```bash
+http://127.0.0.1:8000
 ```
 
 Health check:
 
 ```bash
 curl http://127.0.0.1:8000/health
+```
+
+Terminal 2, frontend:
+
+```bash
+conda activate personal-ai-env
+cd frontend
+npm run dev
+```
+
+Frontend URL:
+
+```bash
+http://localhost:5173
 ```
 
 ## Authentication
@@ -267,7 +333,7 @@ The tests use an isolated SQLite database with `APP_ENV=test` so they do not req
 - Agent layer with specialized cooperative agents
 - Expanded provider routing policies and model evaluation
 - Tool/action system with permissions and audit logs
-- React frontend for chat, memories, documents, tasks, and settings
+- Frontend expansion for registration, conversation history, memories, documents, tasks, and settings
 
 ## License
 
