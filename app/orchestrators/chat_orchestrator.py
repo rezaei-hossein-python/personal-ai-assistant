@@ -1,4 +1,5 @@
 import json
+from dataclasses import dataclass
 
 from sqlalchemy.orm import Session
 
@@ -17,6 +18,12 @@ from app.services.memory_extractor import extract_memory
 from app.services.memory_service import save_memory
 from app.services.message_service import get_messages, save_message
 from app.services.prompt_service import build_chat_messages
+
+
+@dataclass
+class ChatResult:
+    response: str
+    metadata: dict
 
 
 class ChatOrchestrator:
@@ -44,10 +51,22 @@ class ChatOrchestrator:
         model_provider: ModelProvider,
         embedding_provider: EmbeddingProvider,
         model_router: ModelRouter | None = None,
-    ) -> str:
+        knowledge_retrieval: bool | None = None,
+    ) -> ChatResult:
         plan = self.planner_agent.plan(message)
         agents_invoked = [self.planner_agent.name]
         route = None
+        knowledge_mode = "planner"
+        knowledge_enabled = plan.use_knowledge
+
+        if knowledge_retrieval is True:
+            knowledge_mode = "explicit_enabled"
+            knowledge_enabled = True
+            plan.use_knowledge = True
+        elif knowledge_retrieval is False:
+            knowledge_mode = "explicit_disabled"
+            knowledge_enabled = False
+            plan.use_knowledge = False
 
         get_or_create_conversation(
             db,
@@ -86,9 +105,10 @@ class ChatOrchestrator:
             db=db,
             user_id=user_id,
             query=message,
-            enabled=plan.use_knowledge,
+            enabled=knowledge_enabled,
             embedding_provider=embedding_provider,
         )
+        knowledge_context.metadata["mode"] = knowledge_mode
         agents_invoked.append(self.knowledge_agent.name)
 
         self.action_agent.prepare_actions(plan)
@@ -162,7 +182,29 @@ class ChatOrchestrator:
             },
         )
 
-        return response
+        return ChatResult(
+            response=response,
+            metadata={
+                "knowledge": {
+                    "enabled": knowledge_context.metadata.get("enabled", False),
+                    "mode": knowledge_mode,
+                    "retrieval_count": len(knowledge_context.chunks),
+                    "sources": [
+                        {
+                            "document_id": chunk.document_id,
+                            "document_name": chunk.document_name,
+                            "chunk_id": chunk.chunk_id,
+                            "chunk_index": chunk.chunk_index,
+                            "start_character": chunk.start_character,
+                            "end_character": chunk.end_character,
+                            "distance": chunk.distance,
+                        }
+                        for chunk in knowledge_context.chunks
+                    ],
+                    "warning": knowledge_context.metadata.get("warning"),
+                },
+            },
+        )
 
     def _extract_and_store_memory(
         self,

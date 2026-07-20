@@ -41,6 +41,10 @@ def chat(
         model_provider=model_provider,
         embedding_provider=embedding_provider,
         model_router=model_router,
+        knowledge_retrieval=request.knowledge_retrieval,
     )
 
-    return ChatResponse(response=response)
+    return ChatResponse(
+        response=response.response,
+        metadata=response.metadata,
+    )

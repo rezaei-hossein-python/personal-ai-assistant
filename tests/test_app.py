@@ -28,7 +28,7 @@ from app.orchestrators.chat_orchestrator import ChatOrchestrator
 from app.services.embedding_service import EmbeddingProvider
 from app.services.embedding_backfill_service import backfill_missing_chunk_embeddings
 from app.services.chunking_service import chunk_text
-from app.services.retrieval_service import RetrievedChunk
+from app.services.retrieval_service import RetrievedChunk, VectorSearchUnavailableError
 from app.services.text_extraction_service import extract_text
 from app.agents.planner_agent import PlannerAgent
 from app.agents.types import Intent, Plan
@@ -771,6 +771,9 @@ def test_semantic_retrieval_returns_relevant_chunks(client):
     assert len(results) == 2
     assert results[0]["document_name"] == "architecture.txt"
     assert "architecture" in results[0]["content"].lower()
+    assert results[0]["start_character"] == 0
+    assert results[0]["end_character"] > 0
+    assert results[0]["distance"] == 0.0
 
 
 def test_semantic_retrieval_is_scoped_to_user(client):
@@ -843,6 +846,9 @@ def test_chat_includes_retrieved_document_context(monkeypatch, client):
                 chunk_index=0,
                 content="Relevant document context.",
                 metadata={"source": "test"},
+                start_character=5,
+                end_character=31,
+                distance=0.25,
             )
         ],
     )
@@ -864,11 +870,226 @@ def test_chat_includes_retrieved_document_context(monkeypatch, client):
     )
 
     assert response.status_code == 200
-    assert response.json()["response"] == "Used document context."
+    body = response.json()
+    assert body["response"] == "Used document context."
+    assert body["metadata"]["knowledge"] == {
+        "enabled": True,
+        "mode": "planner",
+        "retrieval_count": 1,
+        "sources": [
+            {
+                "document_id": 1,
+                "document_name": "notes.txt",
+                "chunk_id": 10,
+                "chunk_index": 0,
+                "start_character": 5,
+                "end_character": 31,
+                "distance": 0.25,
+            }
+        ],
+        "warning": None,
+    }
     assert any(
         "Relevant document context." in message["content"]
         for message in observed_document_chunks
     )
+
+
+def test_chat_old_request_shape_remains_compatible(monkeypatch, client):
+    token = register_and_login(client)
+    monkeypatch.setattr(
+        "app.orchestrators.chat_orchestrator.extract_memory",
+        lambda message: '{"remember": false}',
+    )
+
+    response = client.post(
+        "/chat",
+        headers=auth_headers(token),
+        json={
+            "conversation_id": "old-shape",
+            "message": "Hello there.",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["response"] == "Fake model response."
+    assert body["metadata"]["knowledge"]["enabled"] is False
+    assert body["metadata"]["knowledge"]["mode"] == "planner"
+    assert body["metadata"]["knowledge"]["sources"] == []
+
+
+def test_chat_forced_knowledge_retrieval(monkeypatch, client):
+    token = register_and_login(client)
+    observed_messages = []
+
+    monkeypatch.setattr(
+        "app.orchestrators.chat_orchestrator.extract_memory",
+        lambda message: '{"remember": false}',
+    )
+
+    class ObservingModelProvider(FakeModelProvider):
+        def generate(self, messages: list[dict]) -> str:
+            observed_messages.extend(messages)
+            return "forced retrieval response"
+
+    override_model_provider(ObservingModelProvider())
+    client.post(
+        "/documents/upload",
+        headers=auth_headers(token),
+        files={
+            "file": (
+                "architecture.txt",
+                b"Architecture notes for forced retrieval.",
+                "text/plain",
+            )
+        },
+    )
+
+    response = client.post(
+        "/chat",
+        headers=auth_headers(token),
+        json={
+            "conversation_id": "forced",
+            "message": "Tell me about architecture.",
+            "knowledge_retrieval": True,
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["response"] == "forced retrieval response"
+    assert body["metadata"]["knowledge"]["enabled"] is True
+    assert body["metadata"]["knowledge"]["mode"] == "explicit_enabled"
+    assert body["metadata"]["knowledge"]["retrieval_count"] == 1
+    source = body["metadata"]["knowledge"]["sources"][0]
+    assert source["document_name"] == "architecture.txt"
+    assert source["start_character"] == 0
+    assert source["end_character"] > 0
+    assert source["distance"] == 0.0
+    assert any(
+        "Architecture notes for forced retrieval" in item["content"]
+        for item in observed_messages
+    )
+
+
+def test_chat_disabled_knowledge_retrieval_overrides_planner(monkeypatch, client):
+    token = register_and_login(client)
+    observed_messages = []
+
+    monkeypatch.setattr(
+        "app.orchestrators.chat_orchestrator.extract_memory",
+        lambda message: '{"remember": false}',
+    )
+
+    class ObservingModelProvider(FakeModelProvider):
+        def generate(self, messages: list[dict]) -> str:
+            observed_messages.extend(messages)
+            return "disabled retrieval response"
+
+    override_model_provider(ObservingModelProvider())
+    client.post(
+        "/documents/upload",
+        headers=auth_headers(token),
+        files={
+            "file": (
+                "architecture.txt",
+                b"Architecture notes that should not be injected.",
+                "text/plain",
+            )
+        },
+    )
+
+    response = client.post(
+        "/chat",
+        headers=auth_headers(token),
+        json={
+            "conversation_id": "disabled",
+            "message": "Search my documents for architecture.",
+            "knowledge_retrieval": False,
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["response"] == "disabled retrieval response"
+    assert body["metadata"]["knowledge"] == {
+        "enabled": False,
+        "mode": "explicit_disabled",
+        "retrieval_count": 0,
+        "sources": [],
+        "warning": None,
+    }
+    assert not any(
+        "Architecture notes that should not be injected" in item["content"]
+        for item in observed_messages
+    )
+
+
+def test_chat_forced_knowledge_retrieval_no_results(monkeypatch, client):
+    token = register_and_login(client)
+    monkeypatch.setattr(
+        "app.orchestrators.chat_orchestrator.extract_memory",
+        lambda message: '{"remember": false}',
+    )
+
+    response = client.post(
+        "/chat",
+        headers=auth_headers(token),
+        json={
+            "conversation_id": "no-results",
+            "message": "Hello there.",
+            "knowledge_retrieval": True,
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["response"] == "Fake model response."
+    assert body["metadata"]["knowledge"] == {
+        "enabled": True,
+        "mode": "explicit_enabled",
+        "retrieval_count": 0,
+        "sources": [],
+        "warning": None,
+    }
+
+
+def test_chat_vector_search_unavailable_returns_warning(monkeypatch, client):
+    token = register_and_login(client)
+    monkeypatch.setattr(
+        "app.orchestrators.chat_orchestrator.extract_memory",
+        lambda message: '{"remember": false}',
+    )
+
+    def unavailable(*args, **kwargs):
+        raise VectorSearchUnavailableError("vector search unavailable")
+
+    monkeypatch.setattr(
+        "app.agents.knowledge_agent.retrieve_relevant_chunks",
+        unavailable,
+    )
+
+    response = client.post(
+        "/chat",
+        headers=auth_headers(token),
+        json={
+            "conversation_id": "unavailable",
+            "message": "Hello there.",
+            "knowledge_retrieval": True,
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["response"] == "Fake model response."
+    assert body["metadata"]["knowledge"] == {
+        "enabled": True,
+        "mode": "explicit_enabled",
+        "retrieval_count": 0,
+        "sources": [],
+        "warning": "vector search unavailable",
+    }
 
 
 def test_orchestrator_memory_only_request(monkeypatch, client):

@@ -21,6 +21,9 @@ class RetrievedChunk:
     chunk_index: int
     content: str
     metadata: dict
+    start_character: int | None = None
+    end_character: int | None = None
+    distance: float | None = None
 
 
 def is_vector_search_available(db: Session) -> bool:
@@ -98,6 +101,9 @@ def retrieve_relevant_chunks(
             chunk_index=row["chunk_index"],
             content=row["content"],
             metadata=row["metadata"] or {},
+            start_character=(row["metadata"] or {}).get("start_character"),
+            end_character=(row["metadata"] or {}).get("end_character"),
+            distance=float(row["distance"]) if row["distance"] is not None else None,
         )
         for row in rows
     ]
@@ -139,8 +145,11 @@ def _retrieve_with_python_cosine(
             chunk_index=chunk.chunk_index,
             content=chunk.content,
             metadata=chunk.chunk_metadata or {},
+            start_character=(chunk.chunk_metadata or {}).get("start_character"),
+            end_character=(chunk.chunk_metadata or {}).get("end_character"),
+            distance=distance,
         )
-        for _, chunk, document in ranked[:limit]
+        for distance, chunk, document in ranked[:limit]
     ]
 
 

@@ -40,3 +40,6 @@ class SearchResult(BaseModel):
     chunk_index: int
     content: str
     metadata: dict
+    start_character: int | None = None
+    end_character: int | None = None
+    distance: float | None = None

@@ -130,6 +130,9 @@ def search_my_documents(
             chunk_index=chunk.chunk_index,
             content=chunk.content,
             metadata=chunk.metadata,
+            start_character=chunk.start_character,
+            end_character=chunk.end_character,
+            distance=chunk.distance,
         )
         for chunk in chunks
     ]
