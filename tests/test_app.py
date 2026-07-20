@@ -1,4 +1,5 @@
 import os
+from io import BytesIO
 
 os.environ["APP_ENV"] = "test"
 os.environ["DATABASE_URL"] = "sqlite:///./test_assistant.db"
@@ -32,6 +33,27 @@ from app.services.retrieval_service import RetrievedChunk, VectorSearchUnavailab
 from app.services.text_extraction_service import extract_text
 from app.agents.planner_agent import PlannerAgent
 from app.agents.types import Intent, Plan
+
+
+def make_docx_bytes(text: str) -> bytes:
+    from docx import Document as DocxDocument
+
+    buffer = BytesIO()
+    document = DocxDocument()
+    document.add_paragraph(text)
+    document.save(buffer)
+    return buffer.getvalue()
+
+
+def make_pdf_bytes(text: str) -> bytes:
+    import fitz
+
+    document = fitz.open()
+    page = document.new_page()
+    page.insert_text((72, 72), text)
+    pdf_bytes = document.tobytes()
+    document.close()
+    return pdf_bytes
 
 
 class FakeEmbeddingProvider(EmbeddingProvider):
@@ -658,6 +680,76 @@ def test_document_upload_and_listing(client):
     assert len(list_response.json()) == 1
 
 
+@pytest.mark.parametrize(
+    ("filename", "content_factory", "content_type", "document_type"),
+    [
+        (
+            "notes.txt",
+            lambda: b"Personal knowledge about project architecture.",
+            "text/plain",
+            "txt",
+        ),
+        (
+            "notes.md",
+            lambda: b"# Architecture\n\nMarkdown knowledge about project architecture.",
+            "text/markdown",
+            "md",
+        ),
+        (
+            "notes.docx",
+            lambda: make_docx_bytes("DOCX knowledge about project architecture."),
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "docx",
+        ),
+        (
+            "notes.pdf",
+            lambda: make_pdf_bytes("PDF knowledge about project architecture."),
+            "application/pdf",
+            "pdf",
+        ),
+    ],
+    ids=["txt", "markdown", "docx", "pdf"],
+)
+def test_authenticated_upload_ingests_supported_document_types(
+    client,
+    filename,
+    content_factory,
+    content_type,
+    document_type,
+):
+    token = register_and_login(client)
+
+    upload_response = client.post(
+        "/documents/upload",
+        headers=auth_headers(token),
+        files={
+            "file": (
+                filename,
+                content_factory(),
+                content_type,
+            )
+        },
+    )
+
+    assert upload_response.status_code == 200
+    document = upload_response.json()
+    assert document["original_filename"] == filename
+    assert document["processing_status"] == "completed"
+    assert document["metadata"]["document_type"] == document_type
+    assert document["metadata"]["character_count"] > 0
+    assert document["metadata"]["chunk_count"] >= 1
+
+    db = SessionLocal()
+    try:
+        chunks = db.query(DocumentChunk).all()
+        assert len(chunks) == document["metadata"]["chunk_count"]
+        assert all(chunk.embedding is not None for chunk in chunks)
+        assert chunks[0].chunk_metadata["start_character"] == 0
+        assert chunks[0].chunk_metadata["end_character"] > 0
+    finally:
+        db.close()
+
+
 def test_document_ownership_isolation(client):
     first_token = register_and_login(
         client,
@@ -771,6 +863,8 @@ def test_semantic_retrieval_returns_relevant_chunks(client):
     assert len(results) == 2
     assert results[0]["document_name"] == "architecture.txt"
     assert "architecture" in results[0]["content"].lower()
+    assert results[0]["metadata"]["start_character"] == 0
+    assert results[0]["metadata"]["end_character"] > 0
     assert results[0]["start_character"] == 0
     assert results[0]["end_character"] > 0
     assert results[0]["distance"] == 0.0

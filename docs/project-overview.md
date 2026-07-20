@@ -2,9 +2,9 @@
 
 ## Purpose
 
-Personal AI Assistant is being developed into a modular personal AI operating system. The current project includes a frozen Backend Core v1 API and a Phase 6 Frontend v1 interface for authenticated chat. The backend includes authenticated chat, user-owned memory and documents, RAG, lightweight agent orchestration, and deterministic multi-model provider routing.
+Personal AI Assistant is being developed into a modular personal AI operating system. The current project includes a frozen Backend Core v1 API, Knowledge/RAG v1, and a React frontend for authenticated chat with document-backed retrieval. The backend includes authenticated chat, user-owned memory and documents, RAG, lightweight agent orchestration, and deterministic multi-model provider routing.
 
-Backend Core v1 remains frozen. Phase 6 integrates with its existing API contracts and does not require backend application changes.
+Backend Core v1 remains frozen. The frontend integrates with its existing API contracts and does not require incompatible backend application changes.
 
 ## Current Backend
 
@@ -35,6 +35,9 @@ Backend Core v1 remains frozen. Phase 6 integrates with its existing API contrac
 - Sign-in form backed by `POST /auth/login`
 - Backend health indicator backed by `GET /health`
 - Real chat flow backed by `POST /chat`
+- Knowledge document upload and listing backed by `/documents`
+- Auto, Always, and Never knowledge retrieval selector
+- Citation/source rendering for retrieved document chunks
 - Logout and session cleanup behavior
 - Responsive single-page chat UI
 
@@ -60,6 +63,10 @@ frontend/
       LoginForm.tsx
       ChatInput.tsx
       ChatMessage.tsx
+      DocumentList.tsx
+      DocumentUpload.tsx
+      KnowledgeModeSelector.tsx
+      KnowledgeSources.tsx
   public/
     favicon.svg
     icons.svg
@@ -96,14 +103,31 @@ Frontend authentication
 Frontend chat
   user submits message
   append local user message
-  POST /chat with bearer token, conversation_id, and message
+  POST /chat with bearer token, conversation_id, message, and knowledge_retrieval mode
   append assistant response
+  render retrieval warnings, no-source state, or citation/source metadata
   preserve visible messages on non-authentication chat errors
+```
+
+```text
+Knowledge/RAG v1 document flow
+  authenticated user uploads TXT, Markdown, DOCX, or PDF
+  backend extracts text
+  backend normalizes and chunks text
+  chunk metadata stores start/end character offsets
+  embedding provider embeds each chunk
+  documents and chunks are stored under the authenticated user
+  PostgreSQL stores chunk embeddings with pgvector
+  chat query is embedded when retrieval is enabled
+  user-scoped vector search returns relevant chunks
+  retrieved chunks are injected into prompt context
+  model response is returned with citation metadata
+  React renders sources, warnings, or no-source state
 ```
 
 The frontend access token is memory-only. It is not stored in local storage, session storage, cookies, or another persistent browser store.
 
-Logout and `401` chat responses clear the access token, current `conversation_id`, displayed messages, errors, and pending send state.
+Logout and `401` chat or document responses clear the access token, current `conversation_id`, displayed messages, document list, selected knowledge mode, errors, and pending state.
 
 ```text
 POST /chat
@@ -125,12 +149,21 @@ POST /chat
 POST /documents/upload
   verify bearer token
   load current user
-  validate file type
+  detect supported file type
   extract text
   chunk text
+  generate embeddings
   store document metadata
-  store chunks linked to the document
+  store chunks and embeddings linked to the document
 ```
+
+Knowledge modes:
+
+- Auto sends `knowledge_retrieval: null`; the planner enables retrieval for document/knowledge/search prompts.
+- Always sends `knowledge_retrieval: true`; retrieval runs even for general prompts.
+- Never sends `knowledge_retrieval: false`; retrieval is disabled even if the planner would select knowledge.
+
+Citation metadata is returned under `metadata.knowledge.sources` with document ID, document name, chunk ID, chunk index, character offsets, and vector distance. Retrieval remains scoped to the authenticated user; User A cannot list, search, or retrieve User B documents.
 
 ## Local Development
 
@@ -205,16 +238,20 @@ POST /documents/upload
 
 The backend and frontend development servers run in separate terminals.
 
-## Frontend V1 Limitations
+## Current Limitations
 
 - Sign-in only; registration remains API-only.
 - Access token is memory-only, so browser refresh requires signing in again.
 - One active in-memory conversation per login session.
 - No conversation history list or resume UI.
-- No memories or documents UI.
+- No memories UI.
+- No document preview or source deep-linking.
 - No streaming responses.
-- No markdown rendering or citations in chat messages.
+- No markdown rendering for assistant text.
 - Backend health check runs only on initial app mount.
+- Runtime semantic retrieval requires PostgreSQL with pgvector.
+- Uploaded original document binaries are not retained; extracted chunks and metadata are stored.
+- Retrieval uses top-k vector similarity without reranking or manual source selection.
 
 ## Architecture Direction
 

@@ -2,7 +2,7 @@
 
 ## Overview
 
-Personal AI Assistant is an early-stage personal AI operating system. The current system includes a frozen Backend Core v1 FastAPI API and a Phase 6 Frontend v1 React interface for authenticated chat. The backend supports authenticated chat, message history, long-term memory extraction, memory management, document ingestion, RAG, lightweight agent orchestration, and deterministic multi-model provider routing.
+Personal AI Assistant is an early-stage personal AI operating system. The current system includes a frozen Backend Core v1 FastAPI API, Knowledge/RAG v1, and a React frontend for authenticated chat with document-backed retrieval. The backend supports authenticated chat, message history, long-term memory extraction, memory management, document ingestion, RAG, lightweight agent orchestration, and deterministic multi-model provider routing.
 
 ## Current Architecture
 
@@ -12,7 +12,7 @@ Frontend
     React + TypeScript + Vite
     http://localhost:5173
     /api development proxy to Backend Core v1
-    login, backend health, chat, logout/session cleanup
+    login, backend health, chat, knowledge uploads, citations, logout/session cleanup
 
 Backend Core v1
   app/main.py
@@ -92,7 +92,7 @@ Chat uses `POST /chat` with a frontend-generated `conversation_id` and message t
 
 On initial app mount, the frontend calls `GET /health` and displays backend status. Network and API failures are shown as user-facing login or chat errors; non-authentication chat failures keep the visible conversation state.
 
-Frontend v1 limitations: sign-in only, no registration UI, memory-only sessions, one active in-memory conversation per login, no conversation history UI, no memories/documents UI, no streaming responses, no markdown rendering, no citations, and a health check only on initial app mount.
+Frontend limitations: sign-in only, no registration UI, memory-only sessions, one active in-memory conversation per login, no conversation history UI, no memories UI, no streaming responses, no markdown rendering for assistant text, no document preview, and a health check only on initial app mount.
 
 ## Requirements
 
@@ -134,7 +134,7 @@ DATABASE_URL=postgresql+psycopg2://username:password@localhost:5432/personal_ai
 
 PostgreSQL is the expected database. SQLite is only supported for tests with `APP_ENV=test`.
 
-Semantic document search requires PostgreSQL with the `vector` extension available. Phase 3.1 enables pgvector-backed storage with `document_chunks.embedding vector(1536)` and cosine similarity retrieval.
+Semantic document search requires PostgreSQL with the `vector` extension available. Knowledge/RAG v1 stores embeddings in `document_chunks.embedding vector(1536)` and uses pgvector cosine similarity retrieval. SQLite is used only in tests, where cosine distance is calculated in Python to keep coverage deterministic.
 
 ## Model Providers
 
@@ -242,7 +242,7 @@ curl http://127.0.0.1:8000/memories \
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
 ```
 
-## Documents And RAG
+## Knowledge/RAG V1
 
 Supported upload formats:
 
@@ -289,21 +289,56 @@ curl -X POST http://127.0.0.1:8000/documents/search \
   -d "{\"query\":\"project architecture\",\"limit\":5}"
 ```
 
-RAG architecture:
+Architecture:
 
 ```text
-Authenticated chat request
+Document upload
+  POST /documents/upload with bearer token
+  text extraction by file type
+  normalized text chunking with start/end character metadata
+  embedding generation for each chunk
+  document and chunks persisted under the authenticated user
+  chunk embeddings stored in PostgreSQL/pgvector
+
+Chat retrieval
+  POST /chat with bearer token
   ChatOrchestrator
     PlannerAgent selects intent/capabilities
-    MemoryAgent loads relevant user memories
-    KnowledgeAgent retrieves user-owned document chunks
-    ActionAgent reserves a safe no-op action interface
+    KnowledgeAgent embeds query text when retrieval is enabled
+    user-scoped pgvector similarity search returns matching chunks
+    PromptService injects retrieved chunks into model context
     ModelRouter selects a configured ModelProvider
     ModelProvider generates a response
-    EvaluatorAgent records obvious context warnings
+    response metadata includes citation/source records for the UI
 ```
 
-Document chunk metadata keeps source document and chunk identifiers so later frontend citations can point back to the relevant source.
+End-to-end flow:
+
+```text
+Document upload
+-> text extraction
+-> chunking
+-> embeddings
+-> PostgreSQL/pgvector
+-> query embedding
+-> user-scoped retrieval
+-> prompt context
+-> model response
+-> citation metadata
+-> React UI
+```
+
+The ingestion pipeline creates a `documents` row for the authenticated user, extracts text, normalizes and chunks text with `start_character` and `end_character` metadata, embeds each chunk, and stores chunks in `document_chunks`. A failed extraction or embedding step marks the document as `failed` with an error message; failed documents remain visible in the frontend document list.
+
+Retrieval is always scoped by authenticated `user_id`. A user can list, fetch, delete, search, and retrieve only their own documents and chunks. The search endpoint and chat retrieval both join chunks through their owning document before returning results.
+
+Knowledge modes are controlled by the optional `knowledge_retrieval` field on `POST /chat`:
+
+- `null` or omitted: Auto. The planner enables retrieval for document/knowledge/search-style prompts.
+- `true`: Always. Retrieval runs even if the planner would not select knowledge.
+- `false`: Never. Retrieval is disabled even if the planner would select knowledge.
+
+Citation metadata is returned under `metadata.knowledge.sources` with document ID, document name, chunk ID, chunk index, character offsets, and distance. The React UI renders sources below assistant messages, displays retrieval warnings, and shows "No document sources found" when Always mode runs retrieval but finds no sources.
 
 Documents uploaded after Phase 3.1 receive embeddings during ingestion. Documents uploaded before the embedding column existed may need to be re-uploaded or backfilled before they appear in semantic search results.
 
@@ -314,6 +349,15 @@ python scripts/backfill_embeddings.py
 ```
 
 The backfill command is idempotent: it skips chunks that already have embeddings and reports scanned, updated, skipped, and failed counts.
+
+Current Knowledge/RAG v1 limitations:
+
+- Semantic retrieval requires PostgreSQL with pgvector in runtime environments.
+- The frontend shows source document names and chunk locations, but it does not open an in-document preview.
+- Uploaded document files are not stored as original binary blobs; extracted text chunks and metadata are stored.
+- Chat responses are non-streaming.
+- Markdown in assistant responses is displayed as plain text.
+- Retrieval uses top-k similarity only; there is no reranker or manual source selection.
 
 ## Testing
 
