@@ -1,0 +1,12 @@
+#root {
+  min-height: 100vh;
+}
+
+main {
+  padding: 40px;
+  font-family: Arial, sans-serif;
+}
+
+h1 {
+  margin-bottom: 12px;
+}
