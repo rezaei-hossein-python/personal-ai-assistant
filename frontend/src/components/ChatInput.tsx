@@ -2,12 +2,13 @@ import { useState, type FormEvent } from 'react'
 
 interface ChatInputProps {
   onSubmit: (message: string) => void
+  disabled?: boolean
 }
 
-export function ChatInput({ onSubmit }: ChatInputProps) {
+export function ChatInput({ disabled = false, onSubmit }: ChatInputProps) {
   const [message, setMessage] = useState('')
   const trimmedMessage = message.trim()
-  const isSubmitDisabled = trimmedMessage.length === 0
+  const isSubmitDisabled = disabled || trimmedMessage.length === 0
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -33,6 +34,7 @@ export function ChatInput({ onSubmit }: ChatInputProps) {
         onChange={(event) => setMessage(event.target.value)}
         placeholder="Type a message..."
         autoComplete="off"
+        disabled={disabled}
       />
       <button className="chat-input__button" type="submit" disabled={isSubmitDisabled}>
         Send

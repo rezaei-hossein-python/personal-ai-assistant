@@ -81,6 +81,90 @@ body {
   box-shadow: 0 18px 45px rgb(40 49 65 / 10%);
 }
 
+.login-panel {
+  display: grid;
+  width: min(100%, 1040px);
+  flex: 1;
+  place-items: center;
+  margin: 0 auto;
+}
+
+.login-form {
+  display: grid;
+  width: min(100%, 420px);
+  gap: 18px;
+  padding: 24px;
+  border: 1px solid #d6dce5;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 18px 45px rgb(40 49 65 / 10%);
+}
+
+.login-form h2 {
+  margin: 0 0 6px;
+  font-size: 1.45rem;
+}
+
+.login-form p {
+  margin: 0;
+  color: #5f6368;
+  line-height: 1.45;
+}
+
+.login-form__field {
+  display: grid;
+  gap: 7px;
+}
+
+.login-form__field label {
+  font-weight: 700;
+}
+
+.login-form__field input {
+  min-width: 0;
+  padding: 12px 14px;
+  border: 1px solid #c9d1dd;
+  border-radius: 8px;
+  color: #202124;
+  font: inherit;
+}
+
+.login-form__field input:focus {
+  border-color: #1a73e8;
+  outline: 3px solid rgb(26 115 232 / 16%);
+}
+
+.login-form__field input:disabled,
+.chat-input__field:disabled {
+  background: #f1f3f6;
+  color: #6f7782;
+  cursor: not-allowed;
+}
+
+.login-form__button {
+  min-height: 44px;
+  border: 0;
+  border-radius: 8px;
+  background: #1a73e8;
+  color: #ffffff;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 700;
+}
+
+.login-form__button:disabled {
+  background: #c6ccd6;
+  cursor: not-allowed;
+}
+
+.form-error,
+.chat-error {
+  margin: 0;
+  color: #b3261e;
+  font-weight: 700;
+  line-height: 1.45;
+}
+
 .message-list {
   display: flex;
   min-height: 420px;
@@ -156,6 +240,17 @@ body {
   overflow-wrap: anywhere;
 }
 
+.thinking-state {
+  margin: 0;
+  color: #5f6368;
+  font-style: italic;
+}
+
+.chat-error {
+  padding: 0 16px 14px;
+  background: #fbfcfe;
+}
+
 .chat-input {
   display: flex;
   gap: 12px;
@@ -227,6 +322,10 @@ body {
   .message-list {
     min-height: 360px;
     padding: 16px;
+  }
+
+  .login-form {
+    padding: 20px;
   }
 
   .chat-message__bubble {
