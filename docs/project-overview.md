@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Personal AI Assistant is being developed into a modular personal AI operating system. The current project includes a frozen Backend Core v1 API, Knowledge/RAG v1, and a React frontend for authenticated chat with document-backed retrieval. The backend includes authenticated chat, user-owned memory and documents, RAG, lightweight agent orchestration, and deterministic multi-model provider routing.
+Personal AI Assistant is being developed into a modular personal AI operating system. The current project includes a frozen Backend Core v1 API, Knowledge/RAG v1, Long-Term Memory v1, and a React frontend for authenticated chat with document-backed retrieval and manually saved memories. The backend includes authenticated chat, user-owned memory and documents, RAG, lightweight agent orchestration, and deterministic multi-model provider routing.
 
 Backend Core v1 remains frozen. The frontend integrates with its existing API contracts and does not require incompatible backend application changes.
 
@@ -21,7 +21,7 @@ Backend Core v1 remains frozen. The frontend integrates with its existing API co
 - User-owned conversations, memories, and documents
 - PDF, DOCX, TXT, and Markdown text extraction
 - Reusable text chunking with OpenAI embeddings stored as pgvector vectors
-- OpenAI Responses API integration for default chat, embeddings, and memory extraction
+- OpenAI Responses API integration for default chat and embeddings
 
 ## Current Frontend
 
@@ -30,14 +30,16 @@ Backend Core v1 remains frozen. The frontend integrates with its existing API co
 - Backend API URL: `http://127.0.0.1:8000`
 - Vite `/api` development proxy to the backend with prefix rewrite
 - Shared JSON API helper in `frontend/src/api/http.ts`
-- Endpoint-specific clients for authentication, chat, and health
+- Endpoint-specific clients for authentication, chat, health, memories, and documents
 - TypeScript request/response contracts in `frontend/src/api/types.ts`
 - Sign-in form backed by `POST /auth/login`
 - Backend health indicator backed by `GET /health`
 - Real chat flow backed by `POST /chat`
 - Knowledge document upload and listing backed by `/documents`
 - Auto, Always, and Never knowledge retrieval selector
+- Memory creation, listing, deletion, and Auto, Always, and Never retrieval selector
 - Citation/source rendering for retrieved document chunks
+- Subtle assistant-message memory usage indicator
 - Logout and session cleanup behavior
 - Responsive single-page chat UI
 
@@ -57,7 +59,9 @@ frontend/
       http.ts
       auth.ts
       chat.ts
+      documents.ts
       health.ts
+      memories.ts
       types.ts
     components/
       LoginForm.tsx
@@ -67,6 +71,8 @@ frontend/
       DocumentUpload.tsx
       KnowledgeModeSelector.tsx
       KnowledgeSources.tsx
+      MemoryModeSelector.tsx
+      MemorySection.tsx
   public/
     favicon.svg
     icons.svg
@@ -96,6 +102,7 @@ Frontend authentication
   POST /auth/login
   store returned access token in React state only
   create in-memory conversation_id
+  load saved memories and documents
   render chat UI
 ```
 
@@ -103,10 +110,21 @@ Frontend authentication
 Frontend chat
   user submits message
   append local user message
-  POST /chat with bearer token, conversation_id, message, and knowledge_retrieval mode
+  POST /chat with bearer token, conversation_id, message, knowledge_retrieval, and memory_retrieval modes
   append assistant response
-  render retrieval warnings, no-source state, or citation/source metadata
+  render memory indication, retrieval warnings, no-source state, or citation/source metadata
   preserve visible messages on non-authentication chat errors
+```
+
+```text
+Long-Term Memory v1 flow
+  authenticated user manually saves category/key/value memories
+  memories are stored under authenticated user_id
+  chat planner or explicit memory_retrieval mode enables retrieval
+  MemoryAgent performs deterministic user-scoped matching
+  prompt context receives matching known user information
+  chat response metadata reports memory mode, count, and category/key sources
+  React renders "Used memory" when memories contributed
 ```
 
 ```text
@@ -127,7 +145,7 @@ Knowledge/RAG v1 document flow
 
 The frontend access token is memory-only. It is not stored in local storage, session storage, cookies, or another persistent browser store.
 
-Logout and `401` chat or document responses clear the access token, current `conversation_id`, displayed messages, document list, selected knowledge mode, errors, and pending state.
+Logout and `401` chat, memory, or document responses clear the access token, current `conversation_id`, displayed messages, document list, memory list, selected knowledge and memory modes, errors, and pending state. Stored memories are not deleted by logout.
 
 ```text
 POST /chat
@@ -135,7 +153,7 @@ POST /chat
   load current user
   call ChatOrchestrator
   PlannerAgent selects intent and capabilities
-  MemoryAgent loads user memory context
+  MemoryAgent retrieves user memory context when enabled
   KnowledgeAgent retrieves document context when needed
   ActionAgent returns no-op action metadata
   ModelRouter selects provider and records fallback metadata
@@ -164,6 +182,16 @@ Knowledge modes:
 - Never sends `knowledge_retrieval: false`; retrieval is disabled even if the planner would select knowledge.
 
 Citation metadata is returned under `metadata.knowledge.sources` with document ID, document name, chunk ID, chunk index, character offsets, and vector distance. Retrieval remains scoped to the authenticated user; User A cannot list, search, or retrieve User B documents.
+
+Memory modes:
+
+- Auto sends `memory_retrieval: null`; the planner/default behavior controls memory retrieval.
+- Always sends `memory_retrieval: true`; retrieval runs even for prompts the planner would treat as non-memory prompts.
+- Never sends `memory_retrieval: false`; retrieval is disabled even if the planner would select memory.
+
+Memory v1 uses explicit creation through `POST /memories` and the frontend Memory section. Chat does not automatically save user messages as long-term memory. Retrieval uses deterministic category/key/value token matching over only the authenticated user's memories. Response metadata is returned under `metadata.memory` with mode, retrieval count, and category/key source summaries. Internal memory IDs are used for list/delete APIs but not exposed in chat metadata.
+
+Memory and Document Knowledge are independent. Memory captures compact facts and preferences; Knowledge captures uploaded document chunks and citations. Both can contribute to a single response when both retrieval paths are enabled.
 
 ## Local Development
 
@@ -244,7 +272,6 @@ The backend and frontend development servers run in separate terminals.
 - Access token is memory-only, so browser refresh requires signing in again.
 - One active in-memory conversation per login session.
 - No conversation history list or resume UI.
-- No memories UI.
 - No document preview or source deep-linking.
 - No streaming responses.
 - No markdown rendering for assistant text.
@@ -252,6 +279,7 @@ The backend and frontend development servers run in separate terminals.
 - Runtime semantic retrieval requires PostgreSQL with pgvector.
 - Uploaded original document binaries are not retained; extracted chunks and metadata are stored.
 - Retrieval uses top-k vector similarity without reranking or manual source selection.
+- Memory retrieval has no embeddings, reranker, provenance graph, or automatic extraction.
 
 ## Architecture Direction
 

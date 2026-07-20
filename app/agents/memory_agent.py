@@ -1,7 +1,7 @@
 from sqlalchemy.orm import Session
 
 from app.agents.types import MemoryContext
-from app.services.memory_service import get_memories
+from app.services.memory_service import retrieve_memories
 
 
 class MemoryAgent:
@@ -11,6 +11,7 @@ class MemoryAgent:
         self,
         db: Session,
         user_id: int,
+        query: str,
         enabled: bool,
     ) -> MemoryContext:
         if not enabled:
@@ -19,7 +20,7 @@ class MemoryAgent:
                 metadata={"enabled": False, "memory_count": 0},
             )
 
-        memories = get_memories(db, user_id)
+        memories = retrieve_memories(db, user_id, query)
         return MemoryContext(
             memories=memories,
             metadata={

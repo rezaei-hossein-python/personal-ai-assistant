@@ -2,9 +2,9 @@
 
 ## Overview
 
-This is the React + TypeScript + Vite frontend for Personal AI Assistant. It integrates with the frozen Backend Core v1 API contracts for authenticated chat, document uploads, Knowledge/RAG retrieval modes, and citation rendering.
+This is the React + TypeScript + Vite frontend for Personal AI Assistant. It integrates with the frozen Backend Core v1 API contracts for authenticated chat, explicit memories, document uploads, Knowledge/RAG retrieval modes, and citation rendering.
 
-Backend Core v1 remains frozen. The frontend calls the existing authentication, health, chat, and document endpoints without requiring incompatible backend API changes.
+Backend Core v1 remains frozen. The frontend calls the existing authentication, health, chat, memory, and document endpoints without requiring incompatible backend API changes.
 
 ## Stack
 
@@ -29,7 +29,9 @@ frontend/
       http.ts
       auth.ts
       chat.ts
+      documents.ts
       health.ts
+      memories.ts
       types.ts
     components/
       LoginForm.tsx
@@ -39,6 +41,8 @@ frontend/
       DocumentUpload.tsx
       KnowledgeModeSelector.tsx
       KnowledgeSources.tsx
+      MemoryModeSelector.tsx
+      MemorySection.tsx
   public/
     favicon.svg
     icons.svg
@@ -54,6 +58,7 @@ The API client lives in `src/api`.
 - `chat.ts` calls `POST /chat`.
 - `documents.ts` calls `/documents` upload, list, fetch, and search endpoints.
 - `health.ts` calls `GET /health`.
+- `memories.ts` calls `/memories` create, list, and delete endpoints.
 - `types.ts` contains frontend request and response contracts that mirror Backend Core v1.
 
 The frontend uses `VITE_API_BASE_URL` when provided. If it is unset, requests default to `/api`.
@@ -118,13 +123,16 @@ Logout clears all frontend session state:
 - current `conversation_id`
 - displayed messages
 - uploaded document list
+- saved memory list
 - selected knowledge mode
+- selected memory mode
 - login errors
 - chat errors
 - document errors
+- memory errors
 - pending send state
 
-If a chat or document request returns `401`, the frontend treats the session as expired, clears the same session state, and asks the user to sign in again.
+If a chat, memory, or document request returns `401`, the frontend treats the session as expired, clears the same session state, and asks the user to sign in again. Logout clears frontend memory state but does not delete stored memories.
 
 ## Backend Health Check
 
@@ -143,9 +151,21 @@ After successful login, the frontend creates a new `conversation_id` in memory. 
 1. Adds the user message to local UI state.
 2. Sends `POST /chat` with the active `conversation_id` and message text.
 3. Adds the assistant response from the backend to local UI state.
-4. Renders retrieval warnings, source citations, or no-source state when returned in response metadata.
+4. Renders memory usage, retrieval warnings, source citations, or no-source state when returned in response metadata.
 
 The chat UI prevents duplicate in-flight sends. Failed non-authentication requests keep the current visible conversation in place and show an error.
+
+## Memory UI
+
+After login, the frontend loads the authenticated user's saved memories and shows a compact Memory section. Users can manually save a memory with category, key, and value fields, list saved memories, and delete a memory. Creating a memory with an existing key updates that saved fact on the backend.
+
+The Memory selector maps UI modes to the backend-compatible `memory_retrieval` field:
+
+- Auto sends `null`.
+- Always sends `true`.
+- Never sends `false`.
+
+Assistant messages render a subtle "Used memory" indicator when `metadata.memory.retrieval_count` is greater than zero. Chat metadata exposes category/key source summaries, not internal memory database IDs.
 
 ## Knowledge UI
 
@@ -158,6 +178,8 @@ The Knowledge selector maps UI modes to the backend-compatible `knowledge_retrie
 - Never sends `false`.
 
 Assistant messages render `metadata.knowledge.sources` as document citations with chunk section and character offsets. Retrieval warnings are shown below the assistant message. In Always mode, an empty retrieval result shows "No document sources found."
+
+Memory and Knowledge controls are independent. Disabling Memory does not disable document retrieval, and disabling Knowledge does not disable memory retrieval.
 
 ## Conversation ID Handling
 
@@ -179,7 +201,6 @@ The ID is cleared on logout and on authentication expiry. Frontend v1 does not l
 - Access tokens are memory-only, so refresh reloads require signing in again.
 - One active in-memory conversation per login session.
 - No conversation history list or resume UI.
-- No memories UI.
 - No document preview or source deep-linking.
 - No streaming responses.
 - No markdown rendering for assistant text.

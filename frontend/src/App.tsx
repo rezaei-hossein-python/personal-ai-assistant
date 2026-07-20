@@ -5,13 +5,16 @@ import { sendChat } from './api/chat'
 import { listDocuments, uploadDocument } from './api/documents'
 import { getHealth } from './api/health'
 import { ApiError } from './api/http'
-import type { DocumentResponse, KnowledgeMode, Message } from './api/types'
+import { createMemory, deleteMemory, listMemories } from './api/memories'
+import type { DocumentResponse, KnowledgeMode, MemoryMode, MemoryResponse, Message } from './api/types'
 import { ChatInput } from './components/ChatInput'
 import { ChatMessage } from './components/ChatMessage'
 import { DocumentList } from './components/DocumentList'
 import { DocumentUpload } from './components/DocumentUpload'
 import { KnowledgeModeSelector } from './components/KnowledgeModeSelector'
 import { LoginForm } from './components/LoginForm'
+import { MemoryModeSelector } from './components/MemoryModeSelector'
+import { MemorySection } from './components/MemorySection'
 
 type BackendStatus = 'loading' | 'connected' | 'unavailable'
 
@@ -21,15 +24,21 @@ function App() {
   const [conversationId, setConversationId] = useState<string | null>(null)
   const [messages, setMessages] = useState<Message[]>([])
   const [documents, setDocuments] = useState<DocumentResponse[]>([])
+  const [memories, setMemories] = useState<MemoryResponse[]>([])
   const [knowledgeMode, setKnowledgeMode] = useState<KnowledgeMode>('auto')
+  const [memoryMode, setMemoryMode] = useState<MemoryMode>('auto')
   const [loginError, setLoginError] = useState<string | null>(null)
   const [chatError, setChatError] = useState<string | null>(null)
   const [documentError, setDocumentError] = useState<string | null>(null)
+  const [memoryError, setMemoryError] = useState<string | null>(null)
   const [uploadError, setUploadError] = useState<string | null>(null)
   const [isLoggingIn, setIsLoggingIn] = useState(false)
   const [isSendingMessage, setIsSendingMessage] = useState(false)
   const [isLoadingDocuments, setIsLoadingDocuments] = useState(false)
+  const [isLoadingMemories, setIsLoadingMemories] = useState(false)
   const [isUploadingDocument, setIsUploadingDocument] = useState(false)
+  const [isCreatingMemory, setIsCreatingMemory] = useState(false)
+  const [isDeletingMemory, setIsDeletingMemory] = useState(false)
   const isSendingMessageRef = useRef(false)
 
   useEffect(() => {
@@ -58,14 +67,20 @@ function App() {
     setConversationId(null)
     setMessages([])
     setDocuments([])
+    setMemories([])
     setKnowledgeMode('auto')
+    setMemoryMode('auto')
     setLoginError(null)
     setChatError(null)
     setDocumentError(null)
+    setMemoryError(null)
     setUploadError(null)
     setIsSendingMessage(false)
     setIsLoadingDocuments(false)
+    setIsLoadingMemories(false)
     setIsUploadingDocument(false)
+    setIsCreatingMemory(false)
+    setIsDeletingMemory(false)
   }
 
   async function handleLogin(email: string, password: string) {
@@ -79,8 +94,12 @@ function App() {
       setMessages([])
       setChatError(null)
       setDocumentError(null)
+      setMemoryError(null)
       setUploadError(null)
-      await loadDocuments(tokenResponse.access_token)
+      await Promise.all([
+        loadDocuments(tokenResponse.access_token),
+        loadMemories(tokenResponse.access_token),
+      ])
     } catch (error) {
       setLoginError(getLoginErrorText(error))
     } finally {
@@ -116,6 +135,25 @@ function App() {
     }
   }
 
+  async function loadMemories(token: string) {
+    setIsLoadingMemories(true)
+    setMemoryError(null)
+
+    try {
+      const memoryResponse = await listMemories(token)
+      setMemories(memoryResponse)
+    } catch (error) {
+      if (isAuthenticationError(error)) {
+        handleSessionExpired()
+        return
+      }
+
+      setMemoryError(getMemoryErrorText(error))
+    } finally {
+      setIsLoadingMemories(false)
+    }
+  }
+
   async function handleUploadDocument(file: File) {
     if (!accessToken || isUploadingDocument) {
       return
@@ -143,6 +181,54 @@ function App() {
     }
   }
 
+  async function handleCreateMemory(category: string, key: string, value: string): Promise<boolean> {
+    if (!accessToken || isCreatingMemory) {
+      return false
+    }
+
+    setIsCreatingMemory(true)
+    setMemoryError(null)
+
+    try {
+      await createMemory({ category, key, value }, accessToken)
+      await loadMemories(accessToken)
+      return true
+    } catch (error) {
+      if (isAuthenticationError(error)) {
+        handleSessionExpired()
+        return false
+      }
+
+      setMemoryError(getMemoryErrorText(error))
+      return false
+    } finally {
+      setIsCreatingMemory(false)
+    }
+  }
+
+  async function handleDeleteMemory(memoryId: number) {
+    if (!accessToken || isDeletingMemory) {
+      return
+    }
+
+    setIsDeletingMemory(true)
+    setMemoryError(null)
+
+    try {
+      await deleteMemory(memoryId, accessToken)
+      await loadMemories(accessToken)
+    } catch (error) {
+      if (isAuthenticationError(error)) {
+        handleSessionExpired()
+        return
+      }
+
+      setMemoryError(getMemoryErrorText(error))
+    } finally {
+      setIsDeletingMemory(false)
+    }
+  }
+
   async function handleSubmitMessage(content: string) {
     if (!accessToken || !conversationId || isSendingMessageRef.current) {
       return
@@ -162,6 +248,7 @@ function App() {
           conversation_id: conversationId,
           message: content,
           knowledge_retrieval: getKnowledgeRetrievalValue(knowledgeMode),
+          memory_retrieval: getMemoryRetrievalValue(memoryMode),
         },
         accessToken,
       )
@@ -221,7 +308,21 @@ function App() {
                 onChange={setKnowledgeMode}
                 disabled={isSendingMessage}
               />
+              <MemoryModeSelector
+                mode={memoryMode}
+                onChange={setMemoryMode}
+                disabled={isSendingMessage}
+              />
             </div>
+            <MemorySection
+              memories={memories}
+              error={memoryError}
+              isCreating={isCreatingMemory}
+              isDeleting={isDeletingMemory}
+              isLoading={isLoadingMemories}
+              onCreate={handleCreateMemory}
+              onDelete={handleDeleteMemory}
+            />
             <DocumentList
               documents={documents}
               error={documentError}
@@ -295,6 +396,18 @@ function getKnowledgeRetrievalValue(mode: KnowledgeMode): boolean | null {
   return null
 }
 
+function getMemoryRetrievalValue(mode: MemoryMode): boolean | null {
+  if (mode === 'always') {
+    return true
+  }
+
+  if (mode === 'never') {
+    return false
+  }
+
+  return null
+}
+
 function getLoginErrorText(error: unknown): string {
   if (isAuthenticationError(error)) {
     return 'Invalid email or password.'
@@ -333,6 +446,18 @@ function getDocumentErrorText(error: unknown): string {
   }
 
   return 'Unable to update documents. Try again.'
+}
+
+function getMemoryErrorText(error: unknown): string {
+  if (isNetworkError(error)) {
+    return 'Cannot reach the backend. Try again shortly.'
+  }
+
+  if (error instanceof ApiError) {
+    return error.message
+  }
+
+  return 'Unable to update memories. Try again.'
 }
 
 function isAuthenticationError(error: unknown): boolean {

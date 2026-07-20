@@ -1,22 +1,22 @@
-import type { KnowledgeMode } from '../api/types'
+import type { MemoryMode } from '../api/types'
 
-interface KnowledgeModeSelectorProps {
+interface MemoryModeSelectorProps {
   disabled?: boolean
-  mode: KnowledgeMode
-  onChange: (mode: KnowledgeMode) => void
+  mode: MemoryMode
+  onChange: (mode: MemoryMode) => void
 }
 
-export function KnowledgeModeSelector({
+export function MemoryModeSelector({
   disabled = false,
   mode,
   onChange,
-}: KnowledgeModeSelectorProps) {
+}: MemoryModeSelectorProps) {
   return (
     <label className="context-mode">
-      <span>Knowledge</span>
+      <span>Memory</span>
       <select
         value={mode}
-        onChange={(event) => onChange(event.target.value as KnowledgeMode)}
+        onChange={(event) => onChange(event.target.value as MemoryMode)}
         disabled={disabled}
       >
         <option value="auto">Auto</option>

@@ -2,7 +2,7 @@
 
 ## Overview
 
-Personal AI Assistant is an early-stage personal AI operating system. The current system includes a frozen Backend Core v1 FastAPI API, Knowledge/RAG v1, and a React frontend for authenticated chat with document-backed retrieval. The backend supports authenticated chat, message history, long-term memory extraction, memory management, document ingestion, RAG, lightweight agent orchestration, and deterministic multi-model provider routing.
+Personal AI Assistant is an early-stage personal AI operating system. The current system includes a frozen Backend Core v1 FastAPI API, Knowledge/RAG v1, Long-Term Memory v1, and a React frontend for authenticated chat with document-backed retrieval and manually saved memories. The backend supports authenticated chat, message history, memory management, document ingestion, RAG, lightweight agent orchestration, and deterministic multi-model provider routing.
 
 ## Current Architecture
 
@@ -12,7 +12,7 @@ Frontend
     React + TypeScript + Vite
     http://localhost:5173
     /api development proxy to Backend Core v1
-    login, backend health, chat, knowledge uploads, citations, logout/session cleanup
+    login, backend health, chat, saved memories, knowledge uploads, citations, logout/session cleanup
 
 Backend Core v1
   app/main.py
@@ -40,7 +40,7 @@ Services
   JWT access tokens
   OpenAI, Gemini, Claude, and Grok generation providers
   OpenAI embedding provider abstraction
-  Memory extraction
+  Explicit long-term memory CRUD and retrieval
   Document parsing and chunking
   Retrieval/RAG prompt context
   Conversation/message persistence
@@ -92,7 +92,7 @@ Chat uses `POST /chat` with a frontend-generated `conversation_id` and message t
 
 On initial app mount, the frontend calls `GET /health` and displays backend status. Network and API failures are shown as user-facing login or chat errors; non-authentication chat failures keep the visible conversation state.
 
-Frontend limitations: sign-in only, no registration UI, memory-only sessions, one active in-memory conversation per login, no conversation history UI, no memories UI, no streaming responses, no markdown rendering for assistant text, no document preview, and a health check only on initial app mount.
+Frontend limitations: sign-in only, no registration UI, memory-only sessions, one active in-memory conversation per login, no conversation history UI, no streaming responses, no markdown rendering for assistant text, no document preview, and a health check only on initial app mount.
 
 ## Requirements
 
@@ -241,6 +241,92 @@ Memory endpoints are also protected:
 curl http://127.0.0.1:8000/memories \
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
 ```
+
+## Long-Term Memory V1
+
+Memory v1 stores user-scoped facts and preferences in the existing `memories` table:
+
+```text
+Memory
+  id
+  user_id
+  category
+  key
+  value
+  created_at
+  updated_at
+```
+
+Memory creation is explicit. The assistant does not automatically save every chat message or silently extract sensitive facts from conversation text. Users save memories through `POST /memories` or the authenticated frontend Memory section.
+
+Create or update a memory:
+
+```bash
+curl -X POST http://127.0.0.1:8000/memories \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
+  -d "{\"category\":\"preference\",\"key\":\"favorite_programming_language\",\"value\":\"Python\"}"
+```
+
+List saved memories:
+
+```bash
+curl http://127.0.0.1:8000/memories \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
+```
+
+Delete a memory:
+
+```bash
+curl -X DELETE http://127.0.0.1:8000/memories/1 \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
+```
+
+Chat memory modes are controlled by optional `memory_retrieval` on `POST /chat`:
+
+- `null` or omitted: Auto. The planner/default behavior decides whether memory retrieval runs.
+- `true`: Always. User-scoped memory retrieval runs even if the planner would not select memory.
+- `false`: Never. Memory retrieval is disabled even if the planner would select memory.
+
+Memory retrieval is deterministic for v1. It tokenizes the chat message, scores the authenticated user's memories by category, key, and value overlap, and injects the top matching memories into the model prompt as known user information. No vector memory pipeline is required for v1, but the service boundary leaves room for future embedding-based memory retrieval.
+
+Retrieved memories never cross user boundaries. Listing, deletion, and chat retrieval all filter by authenticated `user_id`; deleting another user's memory returns `404`.
+
+Chat responses include memory metadata:
+
+```json
+{
+  "metadata": {
+    "memory": {
+      "enabled": true,
+      "mode": "planner",
+      "retrieval_count": 1,
+      "sources": [
+        {
+          "category": "preference",
+          "key": "favorite_programming_language"
+        }
+      ]
+    }
+  }
+}
+```
+
+Internal memory IDs are used for CRUD endpoints but are not shown as chat source metadata. The React UI shows a subtle "Used memory" indicator on assistant messages when memory contributed to the response.
+
+Memory and Document Knowledge are independent context systems:
+
+- Memory stores compact user facts and preferences manually saved by the user.
+- Document Knowledge stores uploaded document chunks with embeddings and source metadata.
+- Both can contribute to the same response when both retrieval modes are enabled by the planner or explicit controls.
+- Disabling Memory does not disable Knowledge, and disabling Knowledge does not disable Memory.
+
+Current Memory v1 limitations:
+
+- No automatic memory extraction from chat.
+- No memory embeddings, semantic reranker, provenance graph, or relationship modeling.
+- Memory prompt context is limited to top deterministic matches.
+- The frontend supports one compact memory list/form, not bulk editing or advanced memory review.
 
 ## Knowledge/RAG V1
 

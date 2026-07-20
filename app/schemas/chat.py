@@ -7,6 +7,7 @@ class ChatRequest(BaseModel):
     conversation_id: str
     message: str
     knowledge_retrieval: bool | None = None
+    memory_retrieval: bool | None = None
 
 
 class KnowledgeSource(BaseModel):
@@ -27,8 +28,21 @@ class KnowledgeRetrievalMetadata(BaseModel):
     warning: str | None = None
 
 
+class MemorySource(BaseModel):
+    category: str
+    key: str
+
+
+class MemoryRetrievalMetadata(BaseModel):
+    enabled: bool
+    mode: Literal["planner", "explicit_enabled", "explicit_disabled"]
+    retrieval_count: int
+    sources: list[MemorySource] = Field(default_factory=list)
+
+
 class ChatResponseMetadata(BaseModel):
     knowledge: KnowledgeRetrievalMetadata | None = None
+    memory: MemoryRetrievalMetadata | None = None
 
 
 class ChatResponse(BaseModel):

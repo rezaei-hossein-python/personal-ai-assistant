@@ -13,6 +13,7 @@ export interface ChatRequest {
   conversation_id: string
   message: string
   knowledge_retrieval?: boolean | null
+  memory_retrieval?: boolean | null
 }
 
 export interface ChatResponse {
@@ -21,8 +22,10 @@ export interface ChatResponse {
 }
 
 export type KnowledgeMode = 'auto' | 'always' | 'never'
+export type MemoryMode = 'auto' | 'always' | 'never'
 
 export type KnowledgeRetrievalMode = 'planner' | 'explicit_enabled' | 'explicit_disabled'
+export type MemoryRetrievalMode = 'planner' | 'explicit_enabled' | 'explicit_disabled'
 
 export interface KnowledgeSource {
   document_id: number
@@ -42,8 +45,35 @@ export interface KnowledgeRetrievalMetadata {
   warning: string | null
 }
 
+export interface MemorySource {
+  category: string
+  key: string
+}
+
+export interface MemoryRetrievalMetadata {
+  enabled: boolean
+  mode: MemoryRetrievalMode
+  retrieval_count: number
+  sources: MemorySource[]
+}
+
 export interface ChatResponseMetadata {
   knowledge: KnowledgeRetrievalMetadata | null
+  memory: MemoryRetrievalMetadata | null
+}
+
+export interface MemoryCreateRequest {
+  category: string
+  key: string
+  value: string
+}
+
+export interface MemoryResponse {
+  id: number
+  user_id: number
+  category: string
+  key: string
+  value: string
 }
 
 export type DocumentProcessingStatus = 'processing' | 'completed' | 'failed' | string

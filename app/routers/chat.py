@@ -42,6 +42,7 @@ def chat(
         embedding_provider=embedding_provider,
         model_router=model_router,
         knowledge_retrieval=request.knowledge_retrieval,
+        memory_retrieval=request.memory_retrieval,
     )
 
     return ChatResponse(

@@ -277,6 +277,30 @@ def test_memory_creation_and_retrieval(client):
     assert memories[0]["value"] == "VS Code"
 
 
+def test_memory_deletion(client):
+    token = register_and_login(client)
+
+    create_response = client.post(
+        "/memories",
+        headers=auth_headers(token),
+        json={
+            "category": "preference",
+            "key": "editor",
+            "value": "VS Code",
+        },
+    )
+    memory_id = create_response.json()["id"]
+
+    delete_response = client.delete(
+        f"/memories/{memory_id}",
+        headers=auth_headers(token),
+    )
+    list_response = client.get("/memories", headers=auth_headers(token))
+
+    assert delete_response.status_code == 200
+    assert list_response.json() == []
+
+
 def test_planner_routing():
     planner = PlannerAgent()
 
@@ -397,16 +421,8 @@ def test_model_router_collaboration_mode():
     assert "anthropic" in route.providers_invoked
 
 
-def test_chat_flow_persists_messages_and_memory(monkeypatch, client):
+def test_chat_flow_persists_messages_without_auto_memory(monkeypatch, client):
     token = register_and_login(client)
-
-    monkeypatch.setattr(
-        "app.orchestrators.chat_orchestrator.extract_memory",
-        lambda message: (
-            '{"remember": true, "category": "preference", '
-            '"key": "language", "value": "Python"}'
-        ),
-    )
 
     response = client.post(
         "/chat",
@@ -423,8 +439,7 @@ def test_chat_flow_persists_messages_and_memory(monkeypatch, client):
     memories_response = client.get("/memories", headers=auth_headers(token))
     memories = memories_response.json()
 
-    assert len(memories) == 1
-    assert memories[0]["key"] == "language"
+    assert memories == []
 
 
 def test_memory_ownership_isolation(client):
@@ -1011,6 +1026,151 @@ def test_chat_old_request_shape_remains_compatible(monkeypatch, client):
     assert body["metadata"]["knowledge"]["enabled"] is False
     assert body["metadata"]["knowledge"]["mode"] == "planner"
     assert body["metadata"]["knowledge"]["sources"] == []
+    assert body["metadata"]["memory"]["enabled"] is True
+    assert body["metadata"]["memory"]["mode"] == "planner"
+    assert body["metadata"]["memory"]["sources"] == []
+
+
+def test_chat_uses_saved_memory_across_conversations(client):
+    token = register_and_login(client)
+    observed_messages = []
+
+    class ObservingModelProvider(FakeModelProvider):
+        def generate(self, messages: list[dict]) -> str:
+            observed_messages.append(messages)
+            return "Your favorite programming language is Python."
+
+    override_model_provider(ObservingModelProvider())
+    client.post(
+        "/memories",
+        headers=auth_headers(token),
+        json={
+            "category": "preference",
+            "key": "favorite_programming_language",
+            "value": "Python",
+        },
+    )
+    first_response = client.post(
+        "/chat",
+        headers=auth_headers(token),
+        json={
+            "conversation_id": "first-memory-conversation",
+            "message": "Hello there.",
+        },
+    )
+    second_response = client.post(
+        "/chat",
+        headers=auth_headers(token),
+        json={
+            "conversation_id": "second-memory-conversation",
+            "message": "What is my favorite programming language?",
+        },
+    )
+
+    assert first_response.status_code == 200
+    assert second_response.status_code == 200
+    assert any(
+        "favorite_programming_language: Python" in item["content"]
+        for item in observed_messages[1]
+    )
+    assert second_response.json()["metadata"]["memory"] == {
+        "enabled": True,
+        "mode": "planner",
+        "retrieval_count": 1,
+        "sources": [
+            {
+                "category": "preference",
+                "key": "favorite_programming_language",
+            }
+        ],
+    }
+
+
+def test_chat_forced_memory_retrieval(client):
+    token = register_and_login(client)
+    observed_messages = []
+
+    class ObservingModelProvider(FakeModelProvider):
+        def generate(self, messages: list[dict]) -> str:
+            observed_messages.extend(messages)
+            return "forced memory response"
+
+    override_model_provider(ObservingModelProvider())
+    client.post(
+        "/memories",
+        headers=auth_headers(token),
+        json={
+            "category": "preference",
+            "key": "favorite_language",
+            "value": "Python",
+        },
+    )
+
+    response = client.post(
+        "/chat",
+        headers=auth_headers(token),
+        json={
+            "conversation_id": "forced-memory",
+            "message": "favorite language",
+            "memory_retrieval": True,
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["metadata"]["memory"] == {
+        "enabled": True,
+        "mode": "explicit_enabled",
+        "retrieval_count": 1,
+        "sources": [
+            {
+                "category": "preference",
+                "key": "favorite_language",
+            }
+        ],
+    }
+    assert any("favorite_language: Python" in item["content"] for item in observed_messages)
+
+
+def test_chat_disabled_memory_retrieval_overrides_planner(client):
+    token = register_and_login(client)
+    observed_messages = []
+
+    class ObservingModelProvider(FakeModelProvider):
+        def generate(self, messages: list[dict]) -> str:
+            observed_messages.extend(messages)
+            return "disabled memory response"
+
+    override_model_provider(ObservingModelProvider())
+    client.post(
+        "/memories",
+        headers=auth_headers(token),
+        json={
+            "category": "preference",
+            "key": "editor",
+            "value": "VS Code",
+        },
+    )
+
+    response = client.post(
+        "/chat",
+        headers=auth_headers(token),
+        json={
+            "conversation_id": "disabled-memory",
+            "message": "What do you remember about my editor?",
+            "memory_retrieval": False,
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["metadata"]["memory"] == {
+        "enabled": False,
+        "mode": "explicit_disabled",
+        "retrieval_count": 0,
+        "sources": [],
+    }
+    assert not any("editor: VS Code" in item["content"] for item in observed_messages)
 
 
 def test_chat_forced_knowledge_retrieval(monkeypatch, client):
@@ -1307,6 +1467,15 @@ def test_orchestrator_combined_context_and_metadata(monkeypatch, client):
     )
 
     assert response.status_code == 200
+    body = response.json()
+    assert body["metadata"]["knowledge"]["retrieval_count"] == 1
+    assert body["metadata"]["memory"]["retrieval_count"] == 1
+    assert body["metadata"]["memory"]["sources"] == [
+        {
+            "category": "preference",
+            "key": "editor",
+        }
+    ]
     metadata = orchestrator.last_execution_metadata
     assert metadata is not None
     assert metadata.selected_intent == "combined_context"

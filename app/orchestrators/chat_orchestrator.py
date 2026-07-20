@@ -52,12 +52,24 @@ class ChatOrchestrator:
         embedding_provider: EmbeddingProvider,
         model_router: ModelRouter | None = None,
         knowledge_retrieval: bool | None = None,
+        memory_retrieval: bool | None = None,
     ) -> ChatResult:
         plan = self.planner_agent.plan(message)
         agents_invoked = [self.planner_agent.name]
         route = None
+        memory_mode = "planner"
+        memory_enabled = plan.use_memory
         knowledge_mode = "planner"
         knowledge_enabled = plan.use_knowledge
+
+        if memory_retrieval is True:
+            memory_mode = "explicit_enabled"
+            memory_enabled = True
+            plan.use_memory = True
+        elif memory_retrieval is False:
+            memory_mode = "explicit_disabled"
+            memory_enabled = False
+            plan.use_memory = False
 
         if knowledge_retrieval is True:
             knowledge_mode = "explicit_enabled"
@@ -82,12 +94,6 @@ class ChatOrchestrator:
             user_id,
         )
 
-        self._extract_and_store_memory(
-            db=db,
-            user_id=user_id,
-            message=message,
-        )
-
         history = get_messages(
             db,
             conversation_id,
@@ -97,8 +103,10 @@ class ChatOrchestrator:
         memory_context = self.memory_agent.get_context(
             db=db,
             user_id=user_id,
-            enabled=plan.use_memory,
+            query=message,
+            enabled=memory_enabled,
         )
+        memory_context.metadata["mode"] = memory_mode
         agents_invoked.append(self.memory_agent.name)
 
         knowledge_context = self.knowledge_agent.get_context(
@@ -202,6 +210,18 @@ class ChatOrchestrator:
                         for chunk in knowledge_context.chunks
                     ],
                     "warning": knowledge_context.metadata.get("warning"),
+                },
+                "memory": {
+                    "enabled": memory_context.metadata.get("enabled", False),
+                    "mode": memory_mode,
+                    "retrieval_count": len(memory_context.memories),
+                    "sources": [
+                        {
+                            "category": memory.category,
+                            "key": memory.key,
+                        }
+                        for memory in memory_context.memories
+                    ],
                 },
             },
         )

@@ -115,7 +115,7 @@ body {
 
 .knowledge-panel__controls {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto auto;
   gap: 14px;
   align-items: end;
 }
@@ -127,7 +127,8 @@ body {
 }
 
 .document-upload__label,
-.knowledge-mode span {
+.context-mode span,
+.memory-form span {
   color: #3c4043;
   font-size: 0.82rem;
   font-weight: 700;
@@ -147,7 +148,10 @@ body {
 }
 
 .document-upload button,
-.knowledge-mode select {
+.context-mode select,
+.memory-form button,
+.memory-form input,
+.memory-list__item button {
   min-height: 34px;
   border: 1px solid #c9d1dd;
   border-radius: 8px;
@@ -163,22 +167,34 @@ body {
   font-weight: 700;
 }
 
+.memory-form button,
+.memory-list__item button {
+  padding: 0 12px;
+  cursor: pointer;
+  font-weight: 700;
+}
+
 .document-upload button:disabled,
 .document-upload input:disabled,
-.knowledge-mode select:disabled {
+.context-mode select:disabled,
+.memory-form button:disabled,
+.memory-form input:disabled,
+.memory-list__item button:disabled {
   background: #f1f3f6;
   color: #6f7782;
   cursor: not-allowed;
 }
 
 .document-upload__hint,
-.document-list__empty {
+.document-list__empty,
+.memory-list__empty {
   margin: 0;
   color: #6f7782;
   font-size: 0.82rem;
 }
 
-.document-error {
+.document-error,
+.memory-error {
   margin: 0;
   color: #b3261e;
   font-size: 0.84rem;
@@ -186,21 +202,53 @@ body {
   line-height: 1.35;
 }
 
-.knowledge-mode {
+.context-mode {
   display: grid;
   min-width: 132px;
   gap: 6px;
 }
 
-.knowledge-mode select {
+.context-mode select {
   padding: 0 10px;
 }
 
+.memory-section {
+  display: grid;
+  gap: 10px;
+}
+
+.memory-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: end;
+}
+
+.memory-form__fields {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(120px, 0.8fr) minmax(140px, 1fr) minmax(180px, 1.4fr);
+  gap: 8px;
+}
+
+.memory-form label {
+  display: grid;
+  min-width: 0;
+  gap: 5px;
+}
+
+.memory-form input {
+  min-width: 0;
+  padding: 0 10px;
+}
+
+.memory-list,
 .document-list {
   display: grid;
   gap: 8px;
 }
 
+.memory-list__header,
 .document-list__header {
   display: flex;
   align-items: center;
@@ -208,17 +256,20 @@ body {
   gap: 12px;
 }
 
+.memory-list h2,
 .document-list h2 {
   margin: 0;
   font-size: 0.9rem;
 }
 
+.memory-list__header span,
 .document-list__header span {
   color: #6f7782;
   font-size: 0.82rem;
   font-weight: 700;
 }
 
+.memory-list ul,
 .document-list ul {
   display: grid;
   max-height: 118px;
@@ -229,6 +280,7 @@ body {
   list-style: none;
 }
 
+.memory-list__item,
 .document-list__item {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -240,16 +292,26 @@ body {
   background: #ffffff;
 }
 
+.memory-list__key,
+.memory-list__value,
 .document-list__name,
 .document-list__error {
   display: block;
   overflow-wrap: anywhere;
 }
 
+.memory-list__key,
 .document-list__name {
   color: #202124;
   font-size: 0.9rem;
   font-weight: 700;
+}
+
+.memory-list__value {
+  margin-top: 2px;
+  color: #5f6368;
+  font-size: 0.84rem;
+  line-height: 1.35;
 }
 
 .document-list__error {
@@ -430,11 +492,22 @@ body {
 }
 
 .chat-message__role {
-  display: block;
-  margin-bottom: 4px;
+  display: inline-block;
+  margin: 0 8px 4px 0;
   font-size: 0.78rem;
   font-weight: 700;
   opacity: 0.78;
+}
+
+.memory-used {
+  display: inline-block;
+  margin-bottom: 4px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: #e6f4ea;
+  color: #137333;
+  font-size: 0.74rem;
+  font-weight: 700;
 }
 
 .chat-message__bubble p {
@@ -580,6 +653,9 @@ body {
   }
 
   .knowledge-panel__controls,
+  .memory-form,
+  .memory-form__fields,
+  .memory-list__item,
   .document-list__item {
     grid-template-columns: 1fr;
   }
@@ -590,11 +666,13 @@ body {
   }
 
   .document-upload button,
-  .knowledge-mode select {
+  .context-mode select,
+  .memory-form button,
+  .memory-list__item button {
     min-height: 40px;
   }
 
-  .knowledge-mode {
+  .context-mode {
     min-width: 0;
   }
 
