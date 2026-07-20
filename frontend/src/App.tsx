@@ -2,13 +2,26 @@ import { useEffect, useRef, useState } from 'react'
 import './App.css'
 import { login } from './api/auth'
 import { sendChat } from './api/chat'
+import {
+  deleteConversation,
+  getConversation,
+  listConversations,
+} from './api/conversations'
 import { listDocuments, uploadDocument } from './api/documents'
 import { getHealth } from './api/health'
 import { ApiError } from './api/http'
 import { createMemory, deleteMemory, listMemories } from './api/memories'
-import type { DocumentResponse, KnowledgeMode, MemoryMode, MemoryResponse, Message } from './api/types'
+import type {
+  ConversationSummary,
+  DocumentResponse,
+  KnowledgeMode,
+  MemoryMode,
+  MemoryResponse,
+  Message,
+} from './api/types'
 import { ChatInput } from './components/ChatInput'
 import { ChatMessage } from './components/ChatMessage'
+import { ConversationSidebar } from './components/ConversationSidebar'
 import { DocumentList } from './components/DocumentList'
 import { DocumentUpload } from './components/DocumentUpload'
 import { KnowledgeModeSelector } from './components/KnowledgeModeSelector'
@@ -23,17 +36,22 @@ function App() {
   const [accessToken, setAccessToken] = useState<string | null>(null)
   const [conversationId, setConversationId] = useState<string | null>(null)
   const [messages, setMessages] = useState<Message[]>([])
+  const [conversations, setConversations] = useState<ConversationSummary[]>([])
   const [documents, setDocuments] = useState<DocumentResponse[]>([])
   const [memories, setMemories] = useState<MemoryResponse[]>([])
   const [knowledgeMode, setKnowledgeMode] = useState<KnowledgeMode>('auto')
   const [memoryMode, setMemoryMode] = useState<MemoryMode>('auto')
   const [loginError, setLoginError] = useState<string | null>(null)
   const [chatError, setChatError] = useState<string | null>(null)
+  const [conversationError, setConversationError] = useState<string | null>(null)
   const [documentError, setDocumentError] = useState<string | null>(null)
   const [memoryError, setMemoryError] = useState<string | null>(null)
   const [uploadError, setUploadError] = useState<string | null>(null)
   const [isLoggingIn, setIsLoggingIn] = useState(false)
   const [isSendingMessage, setIsSendingMessage] = useState(false)
+  const [isLoadingConversations, setIsLoadingConversations] = useState(false)
+  const [isLoadingConversation, setIsLoadingConversation] = useState(false)
+  const [isDeletingConversation, setIsDeletingConversation] = useState(false)
   const [isLoadingDocuments, setIsLoadingDocuments] = useState(false)
   const [isLoadingMemories, setIsLoadingMemories] = useState(false)
   const [isUploadingDocument, setIsUploadingDocument] = useState(false)
@@ -66,16 +84,21 @@ function App() {
     setAccessToken(null)
     setConversationId(null)
     setMessages([])
+    setConversations([])
     setDocuments([])
     setMemories([])
     setKnowledgeMode('auto')
     setMemoryMode('auto')
     setLoginError(null)
     setChatError(null)
+    setConversationError(null)
     setDocumentError(null)
     setMemoryError(null)
     setUploadError(null)
     setIsSendingMessage(false)
+    setIsLoadingConversations(false)
+    setIsLoadingConversation(false)
+    setIsDeletingConversation(false)
     setIsLoadingDocuments(false)
     setIsLoadingMemories(false)
     setIsUploadingDocument(false)
@@ -90,13 +113,15 @@ function App() {
     try {
       const tokenResponse = await login({ email, password })
       setAccessToken(tokenResponse.access_token)
-      setConversationId(createConversationId())
+      setConversationId(null)
       setMessages([])
       setChatError(null)
+      setConversationError(null)
       setDocumentError(null)
       setMemoryError(null)
       setUploadError(null)
       await Promise.all([
+        loadConversations(tokenResponse.access_token),
         loadDocuments(tokenResponse.access_token),
         loadMemories(tokenResponse.access_token),
       ])
@@ -133,6 +158,95 @@ function App() {
     } finally {
       setIsLoadingDocuments(false)
     }
+  }
+
+  async function loadConversations(token: string) {
+    setIsLoadingConversations(true)
+    setConversationError(null)
+
+    try {
+      const conversationResponse = await listConversations(token)
+      setConversations(conversationResponse)
+    } catch (error) {
+      if (isAuthenticationError(error)) {
+        handleSessionExpired()
+        return
+      }
+
+      setConversationError(getConversationErrorText(error))
+    } finally {
+      setIsLoadingConversations(false)
+    }
+  }
+
+  async function handleSelectConversation(selectedConversationId: string) {
+    if (!accessToken || isLoadingConversation || selectedConversationId === conversationId) {
+      return
+    }
+
+    setIsLoadingConversation(true)
+    setConversationError(null)
+    setChatError(null)
+
+    try {
+      const conversation = await getConversation(selectedConversationId, accessToken)
+      setConversationId(conversation.conversation_id)
+      setMessages(
+        conversation.messages
+          .filter((message) => message.role === 'user' || message.role === 'assistant')
+          .map((message) => ({
+            role: message.role,
+            content: message.content,
+            created_at: message.created_at,
+          })),
+      )
+    } catch (error) {
+      if (isAuthenticationError(error)) {
+        handleSessionExpired()
+        return
+      }
+
+      setConversationError(getConversationErrorText(error))
+    } finally {
+      setIsLoadingConversation(false)
+    }
+  }
+
+  async function handleDeleteConversation(deletedConversationId: string) {
+    if (!accessToken || isDeletingConversation) {
+      return
+    }
+
+    setIsDeletingConversation(true)
+    setConversationError(null)
+
+    try {
+      await deleteConversation(deletedConversationId, accessToken)
+      setConversations((currentConversations) =>
+        currentConversations.filter(
+          (conversation) => conversation.conversation_id !== deletedConversationId,
+        ),
+      )
+
+      if (deletedConversationId === conversationId) {
+        handleNewChat()
+      }
+    } catch (error) {
+      if (isAuthenticationError(error)) {
+        handleSessionExpired()
+        return
+      }
+
+      setConversationError(getConversationErrorText(error))
+    } finally {
+      setIsDeletingConversation(false)
+    }
+  }
+
+  function handleNewChat() {
+    setConversationId(null)
+    setMessages([])
+    setChatError(null)
   }
 
   async function loadMemories(token: string) {
@@ -230,11 +344,13 @@ function App() {
   }
 
   async function handleSubmitMessage(content: string) {
-    if (!accessToken || !conversationId || isSendingMessageRef.current) {
+    if (!accessToken || isSendingMessageRef.current) {
       return
     }
 
+    const activeConversationId = conversationId ?? createConversationId()
     isSendingMessageRef.current = true
+    setConversationId(activeConversationId)
     setMessages((currentMessages) => [
       ...currentMessages,
       { role: 'user', content },
@@ -245,7 +361,7 @@ function App() {
     try {
       const chatResponse = await sendChat(
         {
-          conversation_id: conversationId,
+          conversation_id: activeConversationId,
           message: content,
           knowledge_retrieval: getKnowledgeRetrievalValue(knowledgeMode),
           memory_retrieval: getMemoryRetrievalValue(memoryMode),
@@ -261,6 +377,7 @@ function App() {
           metadata: chatResponse.metadata,
         },
       ])
+      await loadConversations(accessToken)
     } catch (error) {
       if (isAuthenticationError(error)) {
         handleSessionExpired()
@@ -295,67 +412,89 @@ function App() {
       </header>
 
       {accessToken ? (
-        <section className="chat-panel" aria-label="Conversation">
-          <div className="knowledge-panel">
-            <div className="knowledge-panel__controls">
-              <DocumentUpload
-                error={uploadError}
-                isUploading={isUploadingDocument}
-                onUpload={handleUploadDocument}
+        <section className="workspace-panel" aria-label="Assistant workspace">
+          <ConversationSidebar
+            conversations={conversations}
+            activeConversationId={conversationId}
+            error={conversationError}
+            isLoading={isLoadingConversations}
+            isDeleting={isDeletingConversation}
+            onNewChat={handleNewChat}
+            onSelect={handleSelectConversation}
+            onDelete={handleDeleteConversation}
+          />
+
+          <div className="chat-panel" aria-label="Conversation">
+            <div className="knowledge-panel">
+              <div className="knowledge-panel__controls">
+                <DocumentUpload
+                  error={uploadError}
+                  isUploading={isUploadingDocument}
+                  onUpload={handleUploadDocument}
+                />
+                <KnowledgeModeSelector
+                  mode={knowledgeMode}
+                  onChange={setKnowledgeMode}
+                  disabled={isSendingMessage}
+                />
+                <MemoryModeSelector
+                  mode={memoryMode}
+                  onChange={setMemoryMode}
+                  disabled={isSendingMessage}
+                />
+              </div>
+              <MemorySection
+                memories={memories}
+                error={memoryError}
+                isCreating={isCreatingMemory}
+                isDeleting={isDeletingMemory}
+                isLoading={isLoadingMemories}
+                onCreate={handleCreateMemory}
+                onDelete={handleDeleteMemory}
               />
-              <KnowledgeModeSelector
-                mode={knowledgeMode}
-                onChange={setKnowledgeMode}
-                disabled={isSendingMessage}
-              />
-              <MemoryModeSelector
-                mode={memoryMode}
-                onChange={setMemoryMode}
-                disabled={isSendingMessage}
+              <DocumentList
+                documents={documents}
+                error={documentError}
+                isLoading={isLoadingDocuments}
               />
             </div>
-            <MemorySection
-              memories={memories}
-              error={memoryError}
-              isCreating={isCreatingMemory}
-              isDeleting={isDeletingMemory}
-              isLoading={isLoadingMemories}
-              onCreate={handleCreateMemory}
-              onDelete={handleDeleteMemory}
-            />
-            <DocumentList
-              documents={documents}
-              error={documentError}
-              isLoading={isLoadingDocuments}
-            />
-          </div>
 
-          <div className="message-list">
-            {messages.length === 0 ? (
+            <div className="message-list">
+              {isLoadingConversation ? (
+                <p className="thinking-state" aria-live="polite">
+                  Loading conversation...
+                </p>
+              ) : null}
+
+              {!isLoadingConversation && messages.length === 0 ? (
               <div className="empty-state">
                 <h2>Ready when you are.</h2>
                 <p>Your messages will appear here after you send them to the assistant.</p>
               </div>
-            ) : (
-              messages.map((message, index) => (
-                <ChatMessage key={`${message.role}-${index}`} message={message} />
-              ))
-            )}
+              ) : null}
 
-            {isSendingMessage ? (
-              <p className="thinking-state" aria-live="polite">
-                Assistant is thinking...
+              {messages.map((message, index) => (
+                  <ChatMessage key={`${message.role}-${index}`} message={message} />
+                ))}
+
+              {isSendingMessage ? (
+                <p className="thinking-state" aria-live="polite">
+                  Assistant is thinking...
+                </p>
+              ) : null}
+            </div>
+
+            {chatError ? (
+              <p className="chat-error" role="alert">
+                {chatError}
               </p>
             ) : null}
+
+            <ChatInput
+              onSubmit={handleSubmitMessage}
+              disabled={isSendingMessage || isLoadingConversation}
+            />
           </div>
-
-          {chatError ? (
-            <p className="chat-error" role="alert">
-              {chatError}
-            </p>
-          ) : null}
-
-          <ChatInput onSubmit={handleSubmitMessage} disabled={isSendingMessage} />
         </section>
       ) : (
         <LoginForm error={loginError} isSubmitting={isLoggingIn} onSubmit={handleLogin} />
@@ -434,6 +573,18 @@ function getChatErrorText(error: unknown): string {
   }
 
   return 'Unable to send message. Try again.'
+}
+
+function getConversationErrorText(error: unknown): string {
+  if (isNetworkError(error)) {
+    return 'Cannot reach the backend. Conversation history is unavailable.'
+  }
+
+  if (error instanceof ApiError) {
+    return error.message
+  }
+
+  return 'Unable to update conversation history.'
 }
 
 function getDocumentErrorText(error: unknown): string {

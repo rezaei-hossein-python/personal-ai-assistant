@@ -247,10 +247,12 @@ def test_unauthorized_access_is_rejected(client):
     )
     memories_response = client.get("/memories")
     documents_response = client.get("/documents")
+    conversations_response = client.get("/conversations")
 
     assert chat_response.status_code == 401
     assert memories_response.status_code == 401
     assert documents_response.status_code == 401
+    assert conversations_response.status_code == 401
 
 
 def test_memory_creation_and_retrieval(client):
@@ -652,6 +654,246 @@ def test_conversation_message_database_constraints(client):
         db.rollback()
     finally:
         db.close()
+
+
+def test_chat_creates_conversation_and_conversation_api_lists_messages(client):
+    token = register_and_login(client)
+
+    response = client.post(
+        "/chat",
+        headers=auth_headers(token),
+        json={
+            "conversation_id": "history-v1",
+            "message": "Show this in history.",
+        },
+    )
+    list_response = client.get("/conversations", headers=auth_headers(token))
+    detail_response = client.get(
+        "/conversations/history-v1",
+        headers=auth_headers(token),
+    )
+
+    assert response.status_code == 200
+    assert list_response.status_code == 200
+    conversations = list_response.json()
+    assert len(conversations) == 1
+    assert conversations[0]["conversation_id"] == "history-v1"
+    assert conversations[0]["message_count"] == 2
+    assert conversations[0]["first_user_message"] == "Show this in history."
+    assert conversations[0]["updated_at"] is not None
+
+    assert detail_response.status_code == 200
+    detail = detail_response.json()
+    assert detail["conversation_id"] == "history-v1"
+    assert [(message["role"], message["content"]) for message in detail["messages"]] == [
+        ("user", "Show this in history."),
+        ("assistant", "Fake model response."),
+    ]
+    assert all(message["created_at"] is not None for message in detail["messages"])
+
+
+def test_conversation_api_is_user_scoped(client):
+    first_token = register_and_login(
+        client,
+        email="first@example.com",
+        name="First User",
+    )
+    second_token = register_and_login(
+        client,
+        email="second@example.com",
+        name="Second User",
+    )
+
+    client.post(
+        "/chat",
+        headers=auth_headers(first_token),
+        json={
+            "conversation_id": "private-history",
+            "message": "First user only.",
+        },
+    )
+
+    first_list = client.get("/conversations", headers=auth_headers(first_token))
+    second_list = client.get("/conversations", headers=auth_headers(second_token))
+    second_detail = client.get(
+        "/conversations/private-history",
+        headers=auth_headers(second_token),
+    )
+    second_delete = client.delete(
+        "/conversations/private-history",
+        headers=auth_headers(second_token),
+    )
+
+    assert [item["conversation_id"] for item in first_list.json()] == [
+        "private-history"
+    ]
+    assert second_list.json() == []
+    assert second_detail.status_code == 404
+    assert second_delete.status_code == 404
+
+
+def test_delete_conversation_removes_owned_messages(client):
+    token = register_and_login(client)
+    client.post(
+        "/chat",
+        headers=auth_headers(token),
+        json={
+            "conversation_id": "delete-history",
+            "message": "Delete me.",
+        },
+    )
+
+    delete_response = client.delete(
+        "/conversations/delete-history",
+        headers=auth_headers(token),
+    )
+    detail_response = client.get(
+        "/conversations/delete-history",
+        headers=auth_headers(token),
+    )
+    list_response = client.get("/conversations", headers=auth_headers(token))
+
+    db = SessionLocal()
+    try:
+        remaining_messages = db.query(Message).filter(
+            Message.conversation_id == "delete-history"
+        ).all()
+    finally:
+        db.close()
+
+    assert delete_response.status_code == 200
+    assert detail_response.status_code == 404
+    assert list_response.json() == []
+    assert remaining_messages == []
+
+
+def test_continuing_existing_conversation_appends_messages(client):
+    token = register_and_login(client)
+
+    first_response = client.post(
+        "/chat",
+        headers=auth_headers(token),
+        json={
+            "conversation_id": "continued-history",
+            "message": "First turn.",
+        },
+    )
+    second_response = client.post(
+        "/chat",
+        headers=auth_headers(token),
+        json={
+            "conversation_id": "continued-history",
+            "message": "Second turn.",
+        },
+    )
+    detail_response = client.get(
+        "/conversations/continued-history",
+        headers=auth_headers(token),
+    )
+
+    assert first_response.status_code == 200
+    assert second_response.status_code == 200
+    assert [(message["role"], message["content"]) for message in detail_response.json()["messages"]] == [
+        ("user", "First turn."),
+        ("assistant", "Fake model response."),
+        ("user", "Second turn."),
+        ("assistant", "Fake model response."),
+    ]
+
+
+def test_failed_assistant_generation_does_not_persist_assistant_message(client):
+    token = register_and_login(client)
+
+    class FailingModelProvider(FakeModelProvider):
+        def generate(self, messages: list[dict]) -> str:
+            raise RuntimeError("generation failed")
+
+    override_model_provider(FailingModelProvider())
+
+    with pytest.raises(RuntimeError, match="generation failed"):
+        client.post(
+            "/chat",
+            headers=auth_headers(token),
+            json={
+                "conversation_id": "failed-generation",
+                "message": "This generation fails.",
+            },
+        )
+
+    db = SessionLocal()
+    try:
+        persisted_messages = (
+            db.query(Message)
+            .filter(Message.conversation_id == "failed-generation")
+            .order_by(Message.id)
+            .all()
+        )
+    finally:
+        db.close()
+
+    assert [(message.role, message.content) for message in persisted_messages] == [
+        ("user", "This generation fails."),
+    ]
+
+
+def test_new_conversation_id_creates_separate_history(client):
+    token = register_and_login(client)
+
+    client.post(
+        "/chat",
+        headers=auth_headers(token),
+        json={
+            "conversation_id": "first-new-chat",
+            "message": "First chat.",
+        },
+    )
+    client.post(
+        "/chat",
+        headers=auth_headers(token),
+        json={
+            "conversation_id": "second-new-chat",
+            "message": "Second chat.",
+        },
+    )
+
+    list_response = client.get("/conversations", headers=auth_headers(token))
+    conversation_ids = {
+        conversation["conversation_id"] for conversation in list_response.json()
+    }
+
+    assert conversation_ids == {"first-new-chat", "second-new-chat"}
+
+
+def test_conversation_history_persists_across_login_sessions(client):
+    token = register_and_login(client)
+    client.post(
+        "/chat",
+        headers=auth_headers(token),
+        json={
+            "conversation_id": "relogin-history",
+            "message": "Persist after logout.",
+        },
+    )
+
+    login_response = client.post(
+        "/auth/login",
+        json={
+            "email": "user@example.com",
+            "password": "correct-horse-battery-staple",
+        },
+    )
+    new_token = login_response.json()["access_token"]
+    list_response = client.get("/conversations", headers=auth_headers(new_token))
+    detail_response = client.get(
+        "/conversations/relogin-history",
+        headers=auth_headers(new_token),
+    )
+
+    assert login_response.status_code == 200
+    assert [item["conversation_id"] for item in list_response.json()] == [
+        "relogin-history"
+    ]
+    assert detail_response.json()["messages"][0]["content"] == "Persist after logout."
 
 
 def test_text_extraction_and_chunking_for_markdown():

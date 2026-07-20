@@ -7,6 +7,7 @@ export interface Message {
   role: 'user' | 'assistant'
   content: string
   metadata?: ChatResponseMetadata | null
+  created_at?: string | null
 }
 
 export interface ChatRequest {
@@ -114,4 +115,24 @@ export interface LoginRequest {
 export interface TokenResponse {
   access_token: string
   token_type: string
+}
+
+export interface ConversationMessage {
+  id: number
+  role: 'user' | 'assistant'
+  content: string
+  created_at: string | null
+}
+
+export interface ConversationSummary {
+  conversation_id: string
+  title: string
+  created_at: string | null
+  updated_at: string | null
+  message_count: number
+  first_user_message: string | null
+}
+
+export interface ConversationDetail extends ConversationSummary {
+  messages: ConversationMessage[]
 }

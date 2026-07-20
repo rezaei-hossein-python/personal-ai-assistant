@@ -91,13 +91,141 @@ body {
   outline: 3px solid rgb(26 115 232 / 16%);
 }
 
+.workspace-panel {
+  display: grid;
+  width: min(100%, 1180px);
+  min-height: 0;
+  flex: 1;
+  grid-template-columns: 260px minmax(0, 1fr);
+  gap: 16px;
+  margin: 0 auto;
+}
+
+.conversation-sidebar {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid #d6dce5;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 18px 45px rgb(40 49 65 / 8%);
+}
+
+.conversation-sidebar__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 14px;
+  border-bottom: 1px solid #dfe3ea;
+  background: #fbfcfe;
+}
+
+.conversation-sidebar h2 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.conversation-sidebar__header button,
+.conversation-list__delete {
+  min-height: 34px;
+  border: 1px solid #c9d1dd;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #202124;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 700;
+}
+
+.conversation-sidebar__header button {
+  padding: 0 10px;
+}
+
+.conversation-status,
+.conversation-error {
+  margin: 0;
+  padding: 12px 14px;
+  color: #6f7782;
+  font-size: 0.86rem;
+  line-height: 1.4;
+}
+
+.conversation-error {
+  color: #b3261e;
+  font-weight: 700;
+}
+
+.conversation-list {
+  display: grid;
+  gap: 6px;
+  padding: 10px;
+  margin: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.conversation-list__item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 34px;
+  gap: 6px;
+  align-items: stretch;
+}
+
+.conversation-list__select {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+  padding: 9px 10px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: #202124;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.conversation-list__select span,
+.conversation-list__select small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.conversation-list__select span {
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+.conversation-list__select small {
+  color: #6f7782;
+  font-size: 0.76rem;
+}
+
+.conversation-list__select:hover,
+.conversation-list__select.is-active {
+  border-color: #d6dce5;
+  background: #eef4ff;
+}
+
+.conversation-list__delete {
+  width: 34px;
+  padding: 0;
+  color: #6f7782;
+}
+
+.conversation-list__delete:disabled {
+  background: #f1f3f6;
+  cursor: not-allowed;
+}
+
 .chat-panel {
   display: flex;
-  width: min(100%, 1040px);
   min-height: 0;
   flex: 1;
   flex-direction: column;
-  margin: 0 auto;
   overflow: hidden;
   border: 1px solid #d6dce5;
   border-radius: 8px;
@@ -631,6 +759,14 @@ body {
   .app-header {
     flex-direction: column;
     gap: 12px;
+  }
+
+  .workspace-panel {
+    grid-template-columns: 1fr;
+  }
+
+  .conversation-sidebar {
+    max-height: 260px;
   }
 
   .app-header h1 {

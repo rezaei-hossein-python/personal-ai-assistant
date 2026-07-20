@@ -9,7 +9,7 @@ Backend Core v1 remains frozen. The frontend integrates with its existing API co
 ## Current Backend
 
 - FastAPI application in `app/main.py`
-- Routers for health, authentication, chat, memories, and documents
+- Routers for health, authentication, chat, conversations, memories, and documents
 - SQLAlchemy models for users, conversations, messages, memories, documents, and document chunks
 - Alembic migrations for database schema management
 - PostgreSQL as the expected runtime database
@@ -35,6 +35,7 @@ Backend Core v1 remains frozen. The frontend integrates with its existing API co
 - Sign-in form backed by `POST /auth/login`
 - Backend health indicator backed by `GET /health`
 - Real chat flow backed by `POST /chat`
+- Conversation history list, loading, new-chat reset, and deletion backed by `/conversations`
 - Knowledge document upload and listing backed by `/documents`
 - Auto, Always, and Never knowledge retrieval selector
 - Memory creation, listing, deletion, and Auto, Always, and Never retrieval selector
@@ -59,6 +60,7 @@ frontend/
       http.ts
       auth.ts
       chat.ts
+      conversations.ts
       documents.ts
       health.ts
       memories.ts
@@ -67,6 +69,7 @@ frontend/
       LoginForm.tsx
       ChatInput.tsx
       ChatMessage.tsx
+      ConversationSidebar.tsx
       DocumentList.tsx
       DocumentUpload.tsx
       KnowledgeModeSelector.tsx
@@ -101,19 +104,31 @@ Frontend authentication
   user submits email and password
   POST /auth/login
   store returned access token in React state only
-  create in-memory conversation_id
-  load saved memories and documents
+  clear active conversation_id
+  load saved conversations, memories, and documents
   render chat UI
 ```
 
 ```text
 Frontend chat
   user submits message
+  create a frontend conversation_id when there is no active conversation
   append local user message
   POST /chat with bearer token, conversation_id, message, knowledge_retrieval, and memory_retrieval modes
   append assistant response
+  refresh conversation list
   render memory indication, retrieval warnings, no-source state, or citation/source metadata
   preserve visible messages on non-authentication chat errors
+```
+
+```text
+Conversation History v1 flow
+  authenticated frontend loads GET /conversations after login
+  selecting a conversation calls GET /conversations/{conversation_id}
+  persisted messages render in database order and set the active conversation_id
+  New Chat clears active messages and conversation_id without deleting history
+  the next sent message creates/uses a new frontend-generated conversation_id through POST /chat
+  deleting a conversation calls DELETE /conversations/{conversation_id}
 ```
 
 ```text
@@ -145,7 +160,7 @@ Knowledge/RAG v1 document flow
 
 The frontend access token is memory-only. It is not stored in local storage, session storage, cookies, or another persistent browser store.
 
-Logout and `401` chat, memory, or document responses clear the access token, current `conversation_id`, displayed messages, document list, memory list, selected knowledge and memory modes, errors, and pending state. Stored memories are not deleted by logout.
+Logout and `401` chat, conversation, memory, or document responses clear the access token, current `conversation_id`, displayed messages, conversation list, document list, memory list, selected knowledge and memory modes, errors, and pending state. Stored conversations, messages, memories, and documents are not deleted by logout.
 
 ```text
 POST /chat
@@ -161,6 +176,30 @@ POST /chat
   EvaluatorAgent records context warnings
   persist conversation messages
   return response
+```
+
+```text
+GET /conversations
+  verify bearer token
+  list only current user's conversations
+  sort by latest message timestamp when present, then creation time
+  include title, timestamps, message count, and first user message for display labels
+```
+
+```text
+GET /conversations/{conversation_id}
+  verify bearer token
+  load only the current user's matching conversation
+  return ordered user/assistant messages
+  return 404 for missing conversations or another user's conversation_id
+```
+
+```text
+DELETE /conversations/{conversation_id}
+  verify bearer token
+  delete only the current user's matching conversation
+  cascade delete its messages through the existing ORM relationship
+  return 404 for missing conversations or another user's conversation_id
 ```
 
 ```text
@@ -192,6 +231,10 @@ Memory modes:
 Memory v1 uses explicit creation through `POST /memories` and the frontend Memory section. Chat does not automatically save user messages as long-term memory. Retrieval uses deterministic category/key/value token matching over only the authenticated user's memories. Response metadata is returned under `metadata.memory` with mode, retrieval count, and category/key source summaries. Internal memory IDs are used for list/delete APIs but not exposed in chat metadata.
 
 Memory and Document Knowledge are independent. Memory captures compact facts and preferences; Knowledge captures uploaded document chunks and citations. Both can contribute to a single response when both retrieval paths are enabled.
+
+Conversation History v1 persists conversations and messages in the existing `conversations` and `messages` tables. `/chat` remains backward-compatible: clients continue to provide `conversation_id`; the backend gets or creates that user-scoped conversation; the user message and successful assistant response are persisted with timestamps and ownership. Failed assistant generation is not saved as a successful assistant message.
+
+Historical loaded messages currently contain role, content, and timestamp only. Knowledge citation metadata and memory source metadata are returned for live `/chat` responses but are not persisted on `messages`, so historical citation and memory badges may only appear for messages still present in the current frontend session.
 
 ## Local Development
 
@@ -270,8 +313,9 @@ The backend and frontend development servers run in separate terminals.
 
 - Sign-in only; registration remains API-only.
 - Access token is memory-only, so browser refresh requires signing in again.
-- One active in-memory conversation per login session.
-- No conversation history list or resume UI.
+- Conversation titles use the existing stored title when present; otherwise the frontend derives a label from the first user message or "New conversation".
+- No AI-generated conversation titles in v1.
+- Historical messages do not preserve citation or memory source metadata.
 - No document preview or source deep-linking.
 - No streaming responses.
 - No markdown rendering for assistant text.

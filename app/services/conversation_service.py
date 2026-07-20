@@ -1,5 +1,8 @@
+from sqlalchemy import func
+
 from app.core.logging import logger
 from app.models.conversation import Conversation
+from app.models.message import Message
 
 
 def create_conversation(db, conversation_id: str, user_id: int | None = None):
@@ -59,3 +62,35 @@ def get_or_create_conversation(
         conversation_id,
         user_id,
     )
+
+
+def list_conversations(db, user_id: int):
+    latest_message_at = (
+        db.query(func.max(Message.created_at))
+        .filter(
+            Message.user_id == Conversation.user_id,
+            Message.conversation_id == Conversation.conversation_id,
+        )
+        .correlate(Conversation)
+        .scalar_subquery()
+    )
+
+    return (
+        db.query(Conversation)
+        .filter(Conversation.user_id == user_id)
+        .order_by(
+            latest_message_at.desc().nullslast(),
+            Conversation.created_at.desc(),
+        )
+        .all()
+    )
+
+
+def delete_conversation(db, conversation_id: str, user_id: int) -> bool:
+    conversation = get_conversation(db, conversation_id, user_id)
+    if conversation is None:
+        return False
+
+    db.delete(conversation)
+    db.commit()
+    return True

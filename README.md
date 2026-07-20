@@ -12,7 +12,7 @@ Frontend
     React + TypeScript + Vite
     http://localhost:5173
     /api development proxy to Backend Core v1
-    login, backend health, chat, saved memories, knowledge uploads, citations, logout/session cleanup
+    login, backend health, chat, conversation history, saved memories, knowledge uploads, citations, logout/session cleanup
 
 Backend Core v1
   app/main.py
@@ -21,12 +21,14 @@ Backend Core v1
     /auth/register
     /auth/login
     /chat
+    /conversations
     /memories
     /documents
 
 Routers
   app/routers/auth.py
   app/routers/chat.py
+  app/routers/conversations.py
   app/routers/documents.py
   app/routers/memories.py
   app/routers/health.py
@@ -61,7 +63,7 @@ Models
   DocumentChunk
 ```
 
-Backend Core v1 is frozen. Phase 6 Frontend v1 integrates with the existing backend API contracts and does not require backend application changes.
+Backend Core v1 compatibility is preserved. Conversation History v1 adds authenticated history APIs and frontend history UI while keeping the existing `/chat` request behavior intact.
 
 ## Frontend V1
 
@@ -74,25 +76,27 @@ frontend/src/
     http.ts
     auth.ts
     chat.ts
+    conversations.ts
     health.ts
     types.ts
   components/
     LoginForm.tsx
     ChatInput.tsx
     ChatMessage.tsx
+    ConversationSidebar.tsx
 ```
 
 API requests are centralized through `frontend/src/api/http.ts`. The shared `fetchJson` helper JSON-encodes request bodies, parses JSON responses, attaches bearer tokens when provided, and raises `ApiError` for non-2xx responses. Endpoint-specific clients live in `auth.ts`, `chat.ts`, and `health.ts`.
 
 Vite proxies `/api` to `http://127.0.0.1:8000` during development and strips the `/api` prefix before forwarding. The frontend URL is `http://localhost:5173`.
 
-Authentication uses `POST /auth/login`. The returned access token is stored in React state only and is not persisted to local storage, session storage, or cookies. Logout clears the token, current `conversation_id`, displayed messages, errors, and pending send state. A `401` from chat performs the same session cleanup and asks the user to sign in again.
+Authentication uses `POST /auth/login`. The returned access token is stored in React state only and is not persisted to local storage, session storage, or cookies. Login loads saved conversations, memories, and documents. Logout clears only frontend session state; server-side conversation history is retained. A `401` from authenticated API calls performs the same session cleanup and asks the user to sign in again.
 
-Chat uses `POST /chat` with a frontend-generated `conversation_id` and message text. One `conversation_id` is created after login, kept in memory for the active session, and cleared on logout or authentication expiry.
+Chat uses `POST /chat` with a frontend-generated `conversation_id` and message text. New Chat clears the active messages and `conversation_id` without deleting previous conversations. The next sent message creates a new frontend `conversation_id`; continuing or selecting a conversation reuses its existing ID.
 
 On initial app mount, the frontend calls `GET /health` and displays backend status. Network and API failures are shown as user-facing login or chat errors; non-authentication chat failures keep the visible conversation state.
 
-Frontend limitations: sign-in only, no registration UI, memory-only sessions, one active in-memory conversation per login, no conversation history UI, no streaming responses, no markdown rendering for assistant text, no document preview, and a health check only on initial app mount.
+Frontend limitations: sign-in only, no registration UI, memory-only access-token sessions, no streaming responses, no markdown rendering for assistant text, no document preview, and a health check only on initial app mount. Historical messages load role/content/timestamp only because citation and memory metadata are not persisted yet.
 
 ## Requirements
 
@@ -241,6 +245,52 @@ Memory endpoints are also protected:
 curl http://127.0.0.1:8000/memories \
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
 ```
+
+## Conversation History V1
+
+Conversation History v1 reuses the existing `Conversation` and `Message` models:
+
+```text
+Conversation
+  id
+  user_id
+  conversation_id
+  title
+  created_at
+
+Message
+  id
+  user_id
+  conversation_id
+  role
+  content
+  created_at
+```
+
+`POST /chat` remains backward-compatible. Existing clients keep sending `conversation_id`; the backend gets or creates the current user's conversation, saves the user message, generates the assistant response, then saves the assistant message. Failed assistant generations are not stored as successful assistant messages.
+
+Conversation APIs are authenticated and user-scoped:
+
+```bash
+curl http://127.0.0.1:8000/conversations \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
+```
+
+```bash
+curl http://127.0.0.1:8000/conversations/default \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
+```
+
+```bash
+curl -X DELETE http://127.0.0.1:8000/conversations/default \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
+```
+
+`GET /conversations` returns summaries sorted by latest message activity where possible. The frontend uses the stored title unless it is the default title, then derives a compact label from the first user message or falls back to "New conversation". V1 does not generate AI titles.
+
+Selecting a conversation loads ordered persisted messages, sets the active `conversation_id`, and renders the chat. Logout clears the local conversation list and active chat but does not delete server-side history. Logging in again reloads the history.
+
+Knowledge/RAG and Memory behavior are unchanged. Live `/chat` responses still include citation and memory metadata. Historical messages do not currently store that metadata, so historical citation and memory badges may only appear for messages still in the current frontend session.
 
 ## Long-Term Memory V1
 
