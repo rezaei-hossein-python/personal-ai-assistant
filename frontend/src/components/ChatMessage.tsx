@@ -1,7 +1,4 @@
-export interface Message {
-  role: 'user' | 'assistant'
-  content: string
-}
+import type { Message } from '../api/types'
 
 interface ChatMessageProps {
   message: Message

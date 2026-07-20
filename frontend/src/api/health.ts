@@ -1,9 +1,5 @@
 import { fetchJson } from './http'
-import type { HealthResponse, RootResponse } from './types'
-
-export function getRoot(): Promise<RootResponse> {
-  return fetchJson<RootResponse>('/')
-}
+import type { HealthResponse } from './types'
 
 export function getHealth(): Promise<HealthResponse> {
   return fetchJson<HealthResponse>('/health')

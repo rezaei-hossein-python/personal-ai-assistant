@@ -1,10 +1,12 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import './App.css'
 import { login } from './api/auth'
 import { sendChat } from './api/chat'
 import { getHealth } from './api/health'
+import { ApiError } from './api/http'
+import type { Message } from './api/types'
 import { ChatInput } from './components/ChatInput'
-import { ChatMessage, type Message } from './components/ChatMessage'
+import { ChatMessage } from './components/ChatMessage'
 import { LoginForm } from './components/LoginForm'
 
 type BackendStatus = 'loading' | 'connected' | 'unavailable'
@@ -18,6 +20,7 @@ function App() {
   const [chatError, setChatError] = useState<string | null>(null)
   const [isLoggingIn, setIsLoggingIn] = useState(false)
   const [isSendingMessage, setIsSendingMessage] = useState(false)
+  const isSendingMessageRef = useRef(false)
 
   useEffect(() => {
     let isMounted = true
@@ -39,6 +42,16 @@ function App() {
     }
   }, [])
 
+  function clearSession() {
+    isSendingMessageRef.current = false
+    setAccessToken(null)
+    setConversationId(null)
+    setMessages([])
+    setLoginError(null)
+    setChatError(null)
+    setIsSendingMessage(false)
+  }
+
   async function handleLogin(email: string, password: string) {
     setIsLoggingIn(true)
     setLoginError(null)
@@ -50,17 +63,22 @@ function App() {
       setMessages([])
       setChatError(null)
     } catch (error) {
-      setLoginError(getErrorText(error, 'Unable to sign in. Check your credentials and try again.'))
+      setLoginError(getLoginErrorText(error))
     } finally {
       setIsLoggingIn(false)
     }
   }
 
+  function handleLogout() {
+    clearSession()
+  }
+
   async function handleSubmitMessage(content: string) {
-    if (!accessToken || !conversationId || isSendingMessage) {
+    if (!accessToken || !conversationId || isSendingMessageRef.current) {
       return
     }
 
+    isSendingMessageRef.current = true
     setMessages((currentMessages) => [
       ...currentMessages,
       { role: 'user', content },
@@ -82,8 +100,15 @@ function App() {
         { role: 'assistant', content: chatResponse.response },
       ])
     } catch (error) {
-      setChatError(getErrorText(error, 'Unable to send message. Try again.'))
+      if (isAuthenticationError(error)) {
+        clearSession()
+        setLoginError('Your session expired. Sign in again to continue.')
+        return
+      }
+
+      setChatError(getChatErrorText(error))
     } finally {
+      isSendingMessageRef.current = false
       setIsSendingMessage(false)
     }
   }
@@ -95,10 +120,17 @@ function App() {
           <h1>Personal AI Assistant</h1>
           <p>Ask a question or start a conversation.</p>
         </div>
-        <p className={`backend-status backend-status--${backendStatus}`}>
-          <span className="backend-status__indicator" aria-hidden="true" />
-          {getBackendStatusText(backendStatus)}
-        </p>
+        <div className="app-header__actions">
+          <p className={`backend-status backend-status--${backendStatus}`}>
+            <span className="backend-status__indicator" aria-hidden="true" />
+            {getBackendStatusText(backendStatus)}
+          </p>
+          {accessToken ? (
+            <button className="logout-button" type="button" onClick={handleLogout}>
+              Logout
+            </button>
+          ) : null}
+        </div>
       </header>
 
       {accessToken ? (
@@ -157,12 +189,40 @@ function createConversationId(): string {
   return `conversation-${Date.now()}-${Math.random().toString(36).slice(2)}`
 }
 
-function getErrorText(error: unknown, fallback: string): string {
-  if (error instanceof Error && error.message) {
-    return error.message
+function getLoginErrorText(error: unknown): string {
+  if (isAuthenticationError(error)) {
+    return 'Invalid email or password.'
   }
 
-  return fallback
+  if (isNetworkError(error)) {
+    return 'Cannot reach the backend. Try again shortly.'
+  }
+
+  if (error instanceof ApiError) {
+    return 'Unable to sign in. Try again.'
+  }
+
+  return 'Unable to sign in. Check your credentials and try again.'
+}
+
+function getChatErrorText(error: unknown): string {
+  if (isNetworkError(error)) {
+    return 'Cannot reach the backend. Your conversation was kept.'
+  }
+
+  if (error instanceof ApiError) {
+    return 'Unable to send message. Your conversation was kept.'
+  }
+
+  return 'Unable to send message. Try again.'
+}
+
+function isAuthenticationError(error: unknown): boolean {
+  return error instanceof ApiError && error.status === 401
+}
+
+function isNetworkError(error: unknown): boolean {
+  return error instanceof TypeError
 }
 
 export default App

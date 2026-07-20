@@ -1,10 +1,11 @@
-export interface RootResponse {
-  message: string
-}
-
 export interface HealthResponse {
   application: string
   status: string
+}
+
+export interface Message {
+  role: 'user' | 'assistant'
+  content: string
 }
 
 export interface ChatRequest {

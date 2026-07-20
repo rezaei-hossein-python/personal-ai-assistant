@@ -35,6 +35,13 @@ body {
   color: #5f6368;
 }
 
+.app-header__actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 12px;
+}
+
 .backend-status {
   display: inline-flex;
   flex: 0 0 auto;
@@ -65,6 +72,23 @@ body {
 
 .backend-status--unavailable {
   color: #b3261e;
+}
+
+.logout-button {
+  min-height: 36px;
+  padding: 0 14px;
+  border: 1px solid #c9d1dd;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #202124;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 700;
+}
+
+.logout-button:focus {
+  border-color: #1a73e8;
+  outline: 3px solid rgb(26 115 232 / 16%);
 }
 
 .chat-panel {
@@ -317,6 +341,12 @@ body {
 
   .backend-status {
     white-space: normal;
+  }
+
+  .app-header__actions {
+    width: 100%;
+    flex-wrap: wrap;
+    justify-content: space-between;
   }
 
   .message-list {
