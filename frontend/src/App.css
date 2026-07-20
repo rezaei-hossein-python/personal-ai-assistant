@@ -10,3 +10,20 @@ main {
 h1 {
   margin-bottom: 12px;
 }
+
+.backend-status {
+  margin: 0;
+  font-weight: 600;
+}
+
+.backend-status--loading {
+  color: #5f6368;
+}
+
+.backend-status--connected {
+  color: #137333;
+}
+
+.backend-status--unavailable {
+  color: #b3261e;
+}
