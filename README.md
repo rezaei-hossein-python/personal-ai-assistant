@@ -98,6 +98,18 @@ On initial app mount, the frontend calls `GET /health` and displays backend stat
 
 Frontend limitations: sign-in only, access tokens persist in browser local storage for refresh recovery, no server-side token revocation, no streaming responses, no markdown rendering for assistant text, no document preview, and a health check only on initial app mount. Historical messages load role/content/timestamp only because citation and memory metadata are not persisted yet.
 
+## Accessibility
+
+Phase 13 hardens the web and desktop UI for keyboard use, semantic structure, accessible names, status announcements, visible focus, contrast, zoom/reflow, reduced motion, and destructive-action confirmations. The interface is designed and tested toward WCAG 2.2 Level AA where applicable; this is not a formal conformance certification.
+
+Run the automated accessibility checks from `frontend/`:
+
+```cmd
+npm.cmd run test:a11y
+```
+
+See [Accessibility Guide](docs/accessibility.md) for the audit findings, implementation approach, Narrator checklist, NVDA follow-up checklist, and known limitations.
+
 ## Requirements
 
 - Python 3.12+
@@ -543,6 +555,14 @@ pytest
 ```
 
 The tests use an isolated SQLite database with `APP_ENV=test` so they do not require a local PostgreSQL server.
+
+Run frontend validation from `frontend/`:
+
+```cmd
+npm.cmd run lint
+npm.cmd run build
+npm.cmd run test:a11y
+```
 
 ## Deployment And Operations
 

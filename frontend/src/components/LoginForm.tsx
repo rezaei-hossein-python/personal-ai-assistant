@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react'
+import { useId, useRef, useState, type FormEvent } from 'react'
 
 interface LoginFormProps {
   error: string | null
@@ -22,6 +22,11 @@ export function LoginForm({
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
   const [validationError, setValidationError] = useState<string | null>(null)
+  const errorId = useId()
+  const passwordHelpId = useId()
+  const emailInputRef = useRef<HTMLInputElement>(null)
+  const passwordInputRef = useRef<HTMLInputElement>(null)
+  const confirmPasswordInputRef = useRef<HTMLInputElement>(null)
   const trimmedEmail = email.trim()
   const isRegistering = mode === 'register'
   const isSubmitDisabled =
@@ -39,11 +44,19 @@ export function LoginForm({
 
     if (!isValidEmail(trimmedEmail)) {
       setValidationError('Enter a valid email address.')
+      emailInputRef.current?.focus()
+      return
+    }
+
+    if (isRegistering && password.length < 8) {
+      setValidationError('Password must be at least 8 characters.')
+      passwordInputRef.current?.focus()
       return
     }
 
     if (isRegistering && password !== confirmPassword) {
       setValidationError('Passwords do not match.')
+      confirmPasswordInputRef.current?.focus()
       return
     }
 
@@ -65,8 +78,8 @@ export function LoginForm({
   }
 
   return (
-    <section className="login-panel" aria-labelledby="login-title">
-      <form className="login-form" onSubmit={handleSubmit}>
+    <main className="login-panel" aria-labelledby="login-title">
+      <form className="login-form" onSubmit={handleSubmit} aria-busy={isSubmitting} noValidate>
         <div>
           <h2 id="login-title">{isRegistering ? 'Create account' : 'Sign in'}</h2>
           <p>
@@ -79,12 +92,18 @@ export function LoginForm({
         <div className="login-form__field">
           <label htmlFor="login-email">Email</label>
           <input
+            ref={emailInputRef}
             id="login-email"
             type="email"
             value={email}
-            onChange={(event) => setEmail(event.target.value)}
+            onChange={(event) => {
+              setEmail(event.target.value)
+              setValidationError(null)
+            }}
             autoComplete="email"
             disabled={isSubmitting}
+            aria-describedby={validationError || error ? errorId : undefined}
+            aria-invalid={Boolean(validationError || error)}
             required
           />
         </div>
@@ -92,33 +111,52 @@ export function LoginForm({
         <div className="login-form__field">
           <label htmlFor="login-password">Password</label>
           <input
+            ref={passwordInputRef}
             id="login-password"
             type="password"
             value={password}
-            onChange={(event) => setPassword(event.target.value)}
+            onChange={(event) => {
+              setPassword(event.target.value)
+              setValidationError(null)
+            }}
             autoComplete={isRegistering ? 'new-password' : 'current-password'}
             disabled={isSubmitting}
+            aria-describedby={`${isRegistering ? passwordHelpId : ''}${
+              validationError || error ? ` ${errorId}` : ''
+            }`.trim() || undefined}
+            aria-invalid={Boolean(validationError || error)}
             required
           />
+          {isRegistering ? (
+            <p className="login-form__help" id={passwordHelpId}>
+              Password must be at least 8 characters.
+            </p>
+          ) : null}
         </div>
 
         {isRegistering ? (
           <div className="login-form__field">
             <label htmlFor="login-confirm-password">Confirm password</label>
             <input
+              ref={confirmPasswordInputRef}
               id="login-confirm-password"
               type="password"
               value={confirmPassword}
-              onChange={(event) => setConfirmPassword(event.target.value)}
+              onChange={(event) => {
+                setConfirmPassword(event.target.value)
+                setValidationError(null)
+              }}
               autoComplete="new-password"
               disabled={isSubmitting}
+              aria-describedby={validationError || error ? errorId : undefined}
+              aria-invalid={Boolean(validationError || error)}
               required
             />
           </div>
         ) : null}
 
         {validationError || error ? (
-          <p className="form-error" role="alert">
+          <p className="form-error" id={errorId} role="alert">
             {validationError ?? error}
           </p>
         ) : null}
@@ -136,7 +174,7 @@ export function LoginForm({
           {isRegistering ? 'Sign in instead' : 'Create account'}
         </button>
       </form>
-    </section>
+    </main>
   )
 }
 

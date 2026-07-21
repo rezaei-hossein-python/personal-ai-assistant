@@ -23,14 +23,18 @@ export function KnowledgeSources({ metadata }: KnowledgeSourcesProps) {
   }
 
   return (
-    <div className="knowledge-sources">
+    <section className="knowledge-sources" aria-labelledby="knowledge-sources-title">
       {knowledge.warning ? (
-        <p className="knowledge-sources__warning">{knowledge.warning}</p>
+        <p className="knowledge-sources__warning" role="status">
+          Knowledge warning: {knowledge.warning}
+        </p>
       ) : null}
 
       {knowledge.sources.length > 0 ? (
         <div>
-          <span className="knowledge-sources__title">Sources</span>
+          <h3 className="knowledge-sources__title" id="knowledge-sources-title">
+            Sources
+          </h3>
           <ul>
             {knowledge.sources.map((source) => (
               <li key={`${source.document_id}-${source.chunk_id}`}>
@@ -45,7 +49,7 @@ export function KnowledgeSources({ metadata }: KnowledgeSourcesProps) {
       {showNoSources ? (
         <p className="knowledge-sources__empty">No document sources found.</p>
       ) : null}
-    </div>
+    </section>
   )
 }
 

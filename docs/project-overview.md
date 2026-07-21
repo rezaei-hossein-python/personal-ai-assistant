@@ -71,6 +71,7 @@ Detailed architecture, backup, limitations, and manual test checklist live in `d
 - Subtle assistant-message memory usage indicator
 - Logout and session cleanup behavior
 - Responsive single-page chat UI
+- Phase 13 accessibility hardening for semantic landmarks, keyboard navigation, focus management, screen-reader-friendly statuses, contrast, zoom/reflow, reduced motion, and destructive-action confirmations
 
 Frontend directory structure:
 
@@ -333,6 +334,7 @@ Historical loaded messages currently contain role, content, and timestamp only. 
    ```bash
    npm.cmd run lint
    npm.cmd run build
+   npm.cmd run test:a11y
    ```
 
 The backend and frontend development servers run in separate terminals.
@@ -348,6 +350,7 @@ The backend and frontend development servers run in separate terminals.
 - No streaming responses.
 - No markdown rendering for assistant text.
 - Backend health check runs only on initial app mount.
+- Formal WCAG conformance certification has not been performed; the UI is designed and tested toward WCAG 2.2 Level AA where applicable.
 - Runtime semantic retrieval requires PostgreSQL with pgvector.
 - Uploaded original document binaries are not retained; extracted chunks and metadata are stored.
 - Retrieval uses top-k vector similarity without reranking or manual source selection.

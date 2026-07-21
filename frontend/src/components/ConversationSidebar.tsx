@@ -1,3 +1,4 @@
+import type { RefCallback } from 'react'
 import type { ConversationSummary } from '../api/types'
 
 interface ConversationSidebarProps {
@@ -6,6 +7,8 @@ interface ConversationSidebarProps {
   error: string | null
   isLoading: boolean
   isDeleting: boolean
+  newChatButtonRef?: RefCallback<HTMLButtonElement>
+  conversationButtonRef?: (conversationId: string) => RefCallback<HTMLButtonElement>
   onNewChat: () => void
   onSelect: (conversationId: string) => void
   onDelete: (conversationId: string) => void
@@ -17,15 +20,17 @@ export function ConversationSidebar({
   error,
   isLoading,
   isDeleting,
+  newChatButtonRef,
+  conversationButtonRef,
   onNewChat,
   onSelect,
   onDelete,
 }: ConversationSidebarProps) {
   return (
-    <aside className="conversation-sidebar" aria-label="Conversation history">
+    <nav className="conversation-sidebar" aria-label="Conversation history">
       <div className="conversation-sidebar__header">
         <h2>History</h2>
-        <button type="button" onClick={onNewChat}>
+        <button type="button" onClick={onNewChat} ref={newChatButtonRef}>
           New Chat
         </button>
       </div>
@@ -36,7 +41,11 @@ export function ConversationSidebar({
         </p>
       ) : null}
 
-      {isLoading ? <p className="conversation-status">Loading conversations...</p> : null}
+      {isLoading ? (
+        <p className="conversation-status" role="status">
+          Loading conversations...
+        </p>
+      ) : null}
 
       {!isLoading && conversations.length === 0 ? (
         <p className="conversation-status">No saved conversations yet.</p>
@@ -53,19 +62,23 @@ export function ConversationSidebar({
                 <button
                   className={isActive ? 'conversation-list__select is-active' : 'conversation-list__select'}
                   type="button"
+                  ref={conversationButtonRef?.(conversation.conversation_id)}
                   onClick={() => onSelect(conversation.conversation_id)}
-                  aria-current={isActive ? 'true' : undefined}
+                  aria-current={isActive ? 'page' : undefined}
+                  aria-label={`${label}, ${getMessageCountText(conversation.message_count)}${
+                    isActive ? ', current conversation' : ''
+                  }`}
                   title={label}
                 >
                   <span>{label}</span>
-                  <small>{conversation.message_count} messages</small>
+                  <small>{getMessageCountText(conversation.message_count)}</small>
                 </button>
                 <button
                   className="conversation-list__delete"
                   type="button"
                   onClick={() => onDelete(conversation.conversation_id)}
                   disabled={isDeleting}
-                  aria-label={`Delete ${label}`}
+                  aria-label={`Delete conversation: ${label}`}
                   title="Delete"
                 >
                   X
@@ -75,7 +88,7 @@ export function ConversationSidebar({
           })}
         </ul>
       ) : null}
-    </aside>
+    </nav>
   )
 }
 
@@ -92,4 +105,8 @@ function getConversationLabel(conversation: ConversationSummary): string {
   }
 
   return 'New conversation'
+}
+
+function getMessageCountText(count: number): string {
+  return `${count} ${count === 1 ? 'message' : 'messages'}`
 }

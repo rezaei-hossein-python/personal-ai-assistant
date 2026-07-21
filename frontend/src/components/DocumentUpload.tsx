@@ -1,4 +1,4 @@
-import { useState, type ChangeEvent, type FormEvent } from 'react'
+import { useId, useState, type ChangeEvent, type FormEvent } from 'react'
 
 const supportedExtensions = ['.pdf', '.docx', '.txt', '.md', '.markdown']
 const supportedMimeTypes = [
@@ -22,9 +22,13 @@ export function DocumentUpload({
   isUploading,
   onUpload,
 }: DocumentUploadProps) {
+  const hintId = useId()
+  const selectedFileId = useId()
+  const errorId = useId()
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [validationError, setValidationError] = useState<string | null>(null)
   const isDisabled = disabled || isUploading
+  const fieldError = validationError ?? error
 
   function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0] ?? null
@@ -49,9 +53,9 @@ export function DocumentUpload({
   }
 
   return (
-    <form className="document-upload" onSubmit={handleSubmit}>
+    <form className="document-upload" onSubmit={handleSubmit} aria-busy={isUploading}>
       <label className="document-upload__label" htmlFor="document-upload">
-        Documents
+        Choose document
       </label>
       <div className="document-upload__controls">
         <input
@@ -60,20 +64,22 @@ export function DocumentUpload({
           accept=".pdf,.docx,.txt,.md,.markdown,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain,text/markdown,text/x-markdown"
           onChange={handleFileChange}
           disabled={isDisabled}
+          aria-describedby={`${hintId} ${selectedFileId}${fieldError ? ` ${errorId}` : ''}`}
+          aria-invalid={fieldError ? true : undefined}
         />
         <button type="submit" disabled={isDisabled || !selectedFile || validationError !== null}>
-          {isUploading ? 'Uploading...' : 'Upload'}
+          {isUploading ? 'Uploading document...' : 'Upload document'}
         </button>
       </div>
-      <p className="document-upload__hint">PDF, DOCX, TXT, Markdown</p>
-      {validationError ? (
-        <p className="document-error" role="alert">
-          {validationError}
-        </p>
-      ) : null}
-      {error ? (
-        <p className="document-error" role="alert">
-          {error}
+      <p className="document-upload__hint" id={hintId}>
+        Supported formats: PDF, DOCX, TXT, Markdown.
+      </p>
+      <p className="document-upload__hint" id={selectedFileId} role="status">
+        {selectedFile ? `Selected file: ${selectedFile.name}` : 'No file selected.'}
+      </p>
+      {fieldError ? (
+        <p className="document-error" id={errorId} role="alert">
+          {fieldError}
         </p>
       ) : null}
     </form>

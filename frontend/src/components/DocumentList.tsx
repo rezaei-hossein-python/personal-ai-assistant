@@ -8,10 +8,14 @@ interface DocumentListProps {
 
 export function DocumentList({ documents, error, isLoading }: DocumentListProps) {
   return (
-    <section className="document-list" aria-label="Uploaded documents">
+    <section className="document-list" aria-labelledby="document-list-title" aria-busy={isLoading}>
       <div className="document-list__header">
-        <h2>Knowledge</h2>
-        {isLoading ? <span>Loading...</span> : <span>{documents.length}</span>}
+        <h2 id="document-list-title">Knowledge documents</h2>
+        {isLoading ? (
+          <span role="status">Loading documents...</span>
+        ) : (
+          <span>{getDocumentCountText(documents.length)}</span>
+        )}
       </div>
 
       {error ? (
@@ -33,7 +37,7 @@ export function DocumentList({ documents, error, isLoading }: DocumentListProps)
                 ) : null}
               </div>
               <span className={`document-status document-status--${document.processing_status}`}>
-                {document.processing_status}
+                {getDocumentStatusText(document.processing_status)}
               </span>
             </li>
           ))}
@@ -41,4 +45,24 @@ export function DocumentList({ documents, error, isLoading }: DocumentListProps)
       )}
     </section>
   )
+}
+
+function getDocumentCountText(count: number): string {
+  return `${count} ${count === 1 ? 'document' : 'documents'} available`
+}
+
+function getDocumentStatusText(status: string): string {
+  if (status === 'completed') {
+    return 'Document processing completed'
+  }
+
+  if (status === 'failed') {
+    return 'Document processing failed'
+  }
+
+  if (status === 'processing') {
+    return 'Document processing'
+  }
+
+  return `Document status: ${status}`
 }

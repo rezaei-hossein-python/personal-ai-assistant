@@ -28,7 +28,7 @@ import type {
   Message,
   SecretStatusResponse,
 } from './api/types'
-import { ChatInput } from './components/ChatInput'
+import { ChatInput, type ChatInputHandle } from './components/ChatInput'
 import { ChatMessage } from './components/ChatMessage'
 import { ConversationSidebar } from './components/ConversationSidebar'
 import { DocumentList } from './components/DocumentList'
@@ -63,6 +63,7 @@ function App() {
   const [uploadError, setUploadError] = useState<string | null>(null)
   const [desktopSettingsError, setDesktopSettingsError] = useState<string | null>(null)
   const [desktopValidationMessage, setDesktopValidationMessage] = useState<string | null>(null)
+  const [liveMessage, setLiveMessage] = useState('')
   const [isLoggingIn, setIsLoggingIn] = useState(false)
   const [isSendingMessage, setIsSendingMessage] = useState(false)
   const [isLoadingConversations, setIsLoadingConversations] = useState(false)
@@ -75,6 +76,15 @@ function App() {
   const [isDeletingMemory, setIsDeletingMemory] = useState(false)
   const [isSavingDesktopSettings, setIsSavingDesktopSettings] = useState(false)
   const isSendingMessageRef = useRef(false)
+  const chatInputRef = useRef<ChatInputHandle>(null)
+  const newChatButtonRef = useRef<HTMLButtonElement | null>(null)
+  const conversationButtonRefs = useRef(new Map<string, HTMLButtonElement>())
+  const memoryButtonRefs = useRef(new Map<number, HTMLButtonElement>())
+
+  function announce(message: string) {
+    setLiveMessage('')
+    window.setTimeout(() => setLiveMessage(message), 20)
+  }
 
   useEffect(() => {
     let isMounted = true
@@ -83,11 +93,13 @@ function App() {
       .then(() => {
         if (isMounted) {
           setBackendStatus('connected')
+          announce('Backend connected.')
         }
       })
       .catch(() => {
         if (isMounted) {
           setBackendStatus('unavailable')
+          announce('Backend unavailable.')
         }
       })
 
@@ -160,6 +172,7 @@ function App() {
     setIsUploadingDocument(false)
     setIsCreatingMemory(false)
     setIsDeletingMemory(false)
+    setLiveMessage('')
   }
 
   async function handleLogin(email: string, password: string) {
@@ -170,6 +183,7 @@ function App() {
       const tokenResponse = await login({ email, password })
       storeAccessToken(tokenResponse.access_token)
       setAccessToken(tokenResponse.access_token)
+      announce('Signed in.')
       setConversationId(null)
       setMessages([])
       setChatError(null)
@@ -179,6 +193,7 @@ function App() {
       setUploadError(null)
     } catch (error) {
       setLoginError(getLoginErrorText(error))
+      announce('Sign in failed.')
     } finally {
       setIsLoggingIn(false)
     }
@@ -193,6 +208,7 @@ function App() {
       const tokenResponse = await login({ email, password })
       storeAccessToken(tokenResponse.access_token)
       setAccessToken(tokenResponse.access_token)
+      announce('Account created and signed in.')
       setConversationId(null)
       setMessages([])
       setChatError(null)
@@ -202,6 +218,7 @@ function App() {
       setUploadError(null)
     } catch (error) {
       setLoginError(getRegisterErrorText(error))
+      announce('Account creation failed.')
     } finally {
       setIsLoggingIn(false)
     }
@@ -214,6 +231,7 @@ function App() {
   function handleSessionExpired() {
     clearSession()
     setLoginError('Your session expired. Sign in again to continue.')
+    announce('Your session expired. Sign in again.')
   }
 
   async function loadDocuments(token: string) {
@@ -292,6 +310,16 @@ function App() {
       return
     }
 
+    const deletedIndex = conversations.findIndex(
+      (conversation) => conversation.conversation_id === deletedConversationId,
+    )
+    const deletedConversation = conversations[deletedIndex]
+    const deletedLabel = deletedConversation ? getConversationLabel(deletedConversation) : 'conversation'
+
+    if (!window.confirm(`Delete conversation: ${deletedLabel}?`)) {
+      return
+    }
+
     setIsDeletingConversation(true)
     setConversationError(null)
 
@@ -306,6 +334,16 @@ function App() {
       if (deletedConversationId === conversationId) {
         handleNewChat()
       }
+      announce(`Conversation deleted: ${deletedLabel}.`)
+      const nextConversation = conversations[deletedIndex + 1] ?? conversations[deletedIndex - 1]
+      window.setTimeout(() => {
+        if (nextConversation) {
+          conversationButtonRefs.current.get(nextConversation.conversation_id)?.focus()
+          return
+        }
+
+        newChatButtonRef.current?.focus()
+      }, 0)
     } catch (error) {
       if (isAuthenticationError(error)) {
         handleSessionExpired()
@@ -322,6 +360,8 @@ function App() {
     setConversationId(null)
     setMessages([])
     setChatError(null)
+    announce('New chat ready.')
+    window.setTimeout(() => chatInputRef.current?.focus(), 0)
   }
 
   async function loadMemories(token: string) {
@@ -357,6 +397,9 @@ function App() {
 
       if (uploadedDocument.processing_status === 'failed') {
         setUploadError(uploadedDocument.error_message ?? 'Document processing failed.')
+        announce('Document uploaded, but processing failed.')
+      } else {
+        announce(`Document uploaded: ${uploadedDocument.original_filename}.`)
       }
     } catch (error) {
       if (isAuthenticationError(error)) {
@@ -365,6 +408,7 @@ function App() {
       }
 
       setUploadError(getDocumentErrorText(error))
+      announce('Document upload failed.')
     } finally {
       setIsUploadingDocument(false)
     }
@@ -381,6 +425,7 @@ function App() {
     try {
       await createMemory({ category, key, value }, accessToken)
       await loadMemories(accessToken)
+      announce(`Memory saved: ${category} / ${key}.`)
       return true
     } catch (error) {
       if (isAuthenticationError(error)) {
@@ -389,6 +434,7 @@ function App() {
       }
 
       setMemoryError(getMemoryErrorText(error))
+      announce('Memory save failed.')
       return false
     } finally {
       setIsCreatingMemory(false)
@@ -400,12 +446,30 @@ function App() {
       return
     }
 
+    const deletedIndex = memories.findIndex((memory) => memory.id === memoryId)
+    const deletedMemory = memories[deletedIndex]
+    const deletedLabel = deletedMemory ? `${deletedMemory.category} / ${deletedMemory.key}` : 'memory'
+
+    if (!window.confirm(`Delete memory: ${deletedLabel}?`)) {
+      return
+    }
+
     setIsDeletingMemory(true)
     setMemoryError(null)
 
     try {
       await deleteMemory(memoryId, accessToken)
       await loadMemories(accessToken)
+      announce(`Memory deleted: ${deletedLabel}.`)
+      const nextMemory = memories[deletedIndex + 1] ?? memories[deletedIndex - 1]
+      window.setTimeout(() => {
+        if (nextMemory) {
+          memoryButtonRefs.current.get(nextMemory.id)?.focus()
+          return
+        }
+
+        document.getElementById('memory-section-title')?.focus()
+      }, 0)
     } catch (error) {
       if (isAuthenticationError(error)) {
         handleSessionExpired()
@@ -413,6 +477,7 @@ function App() {
       }
 
       setMemoryError(getMemoryErrorText(error))
+      announce('Memory delete failed.')
     } finally {
       setIsDeletingMemory(false)
     }
@@ -427,9 +492,11 @@ function App() {
       const status = await saveOpenAIKey(apiKey)
       setOpenAIKeyStatus(status)
       setDesktopValidationMessage('OpenAI API key saved securely.')
+      announce('OpenAI API key saved.')
       return true
     } catch (error) {
       setDesktopSettingsError(getDesktopSettingsErrorText(error))
+      announce('OpenAI API key save failed.')
       return false
     } finally {
       setIsSavingDesktopSettings(false)
@@ -445,8 +512,10 @@ function App() {
       const status = await removeOpenAIKey()
       setOpenAIKeyStatus(status)
       setDesktopValidationMessage('OpenAI API key removed.')
+      announce('OpenAI API key removed.')
     } catch (error) {
       setDesktopSettingsError(getDesktopSettingsErrorText(error))
+      announce('OpenAI API key removal failed.')
     } finally {
       setIsSavingDesktopSettings(false)
     }
@@ -460,8 +529,10 @@ function App() {
     try {
       const result = await testOpenAIKey()
       setDesktopValidationMessage(result.message)
+      announce(result.valid ? 'OpenAI API key test succeeded.' : 'OpenAI API key test failed.')
     } catch (error) {
       setDesktopSettingsError(getDesktopSettingsErrorText(error))
+      announce('OpenAI API key test failed.')
     } finally {
       setIsSavingDesktopSettings(false)
     }
@@ -501,8 +572,10 @@ function App() {
           metadata: chatResponse.metadata,
         },
       ])
+      announce('Assistant response ready.')
       if (chatResponse.metadata?.actions?.some(isMemoryChangingAction)) {
         await loadMemories(accessToken)
+        announce('Assistant response ready. Memory updated.')
       }
       await loadConversations(accessToken)
     } catch (error) {
@@ -512,6 +585,7 @@ function App() {
       }
 
       setChatError(getChatErrorText(error))
+      announce('Message send failed.')
     } finally {
       isSendingMessageRef.current = false
       setIsSendingMessage(false)
@@ -519,14 +593,22 @@ function App() {
   }
 
   return (
-    <main className="app-shell">
+    <div className="app-shell">
+      {accessToken ? (
+        <a className="skip-link" href="#conversation-main">
+          Skip to conversation
+        </a>
+      ) : null}
+      <div className="visually-hidden" role="status" aria-live="polite" aria-atomic="true">
+        {liveMessage}
+      </div>
       <header className="app-header">
         <div>
           <h1>Personal AI Assistant</h1>
           <p>Ask a question or start a conversation.</p>
         </div>
         <div className="app-header__actions">
-          <p className={`backend-status backend-status--${backendStatus}`}>
+          <p className={`backend-status backend-status--${backendStatus}`} aria-live="polite">
             <span className="backend-status__indicator" aria-hidden="true" />
             {getBackendStatusText(backendStatus)}
           </p>
@@ -552,19 +634,34 @@ function App() {
       ) : null}
 
       {accessToken ? (
-        <section className="workspace-panel" aria-label="Assistant workspace">
+        <div className="workspace-panel">
           <ConversationSidebar
             conversations={conversations}
             activeConversationId={conversationId}
             error={conversationError}
             isLoading={isLoadingConversations}
             isDeleting={isDeletingConversation}
+            newChatButtonRef={(node) => {
+              newChatButtonRef.current = node
+            }}
+            conversationButtonRef={(id) => (node) => {
+              if (node) {
+                conversationButtonRefs.current.set(id, node)
+              } else {
+                conversationButtonRefs.current.delete(id)
+              }
+            }}
             onNewChat={handleNewChat}
             onSelect={handleSelectConversation}
             onDelete={handleDeleteConversation}
           />
 
-          <div className="chat-panel" aria-label="Conversation">
+          <main
+            className="chat-panel"
+            id="conversation-main"
+            aria-labelledby="conversation-title"
+            tabIndex={-1}
+          >
             <div className="knowledge-panel">
               <div className="knowledge-panel__controls">
                 <DocumentUpload
@@ -589,6 +686,13 @@ function App() {
                 isCreating={isCreatingMemory}
                 isDeleting={isDeletingMemory}
                 isLoading={isLoadingMemories}
+                memoryButtonRef={(id) => (node) => {
+                  if (node) {
+                    memoryButtonRefs.current.set(id, node)
+                  } else {
+                    memoryButtonRefs.current.delete(id)
+                  }
+                }}
                 onCreate={handleCreateMemory}
                 onDelete={handleDeleteMemory}
               />
@@ -599,9 +703,17 @@ function App() {
               />
             </div>
 
-            <div className="message-list">
+            <section
+              className="message-list"
+              id="message-list"
+              aria-labelledby="conversation-title"
+              aria-busy={isSendingMessage || isLoadingConversation}
+            >
+              <h2 className="visually-hidden" id="conversation-title">
+                Conversation
+              </h2>
               {isLoadingConversation ? (
-                <p className="thinking-state" aria-live="polite">
+                <p className="thinking-state" role="status">
                   Loading conversation...
                 </p>
               ) : null}
@@ -622,20 +734,21 @@ function App() {
                   Assistant is thinking...
                 </p>
               ) : null}
-            </div>
+            </section>
 
             {chatError ? (
-              <p className="chat-error" role="alert">
+              <p className="chat-error" id="chat-error" role="alert">
                 {chatError}
               </p>
             ) : null}
 
             <ChatInput
+              ref={chatInputRef}
               onSubmit={handleSubmitMessage}
               disabled={isSendingMessage || isLoadingConversation}
             />
-          </div>
-        </section>
+          </main>
+        </div>
       ) : (
         <LoginForm
           error={loginError}
@@ -645,7 +758,7 @@ function App() {
           onSubmit={handleLogin}
         />
       )}
-    </main>
+    </div>
   )
 }
 
@@ -659,6 +772,21 @@ function getBackendStatusText(status: BackendStatus): string {
   }
 
   return 'Checking backend...'
+}
+
+function getConversationLabel(conversation: ConversationSummary): string {
+  const firstMessage = conversation.first_user_message?.trim()
+  const title = conversation.title?.trim()
+
+  if (title && title !== 'New Conversation') {
+    return title
+  }
+
+  if (firstMessage) {
+    return firstMessage.length > 48 ? `${firstMessage.slice(0, 45)}...` : firstMessage
+  }
+
+  return 'New conversation'
 }
 
 function createConversationId(): string {

@@ -157,9 +157,16 @@ cd frontend
 npm.cmd ci
 npm.cmd run lint
 npm.cmd run build
+npm.cmd run test:a11y
 ```
 
 The desktop launcher requires `frontend/dist` in source mode. The PyInstaller build bundles it as `frontend_dist`.
+
+## Accessibility Notes
+
+Desktop UI accessibility follows the same React implementation as browser mode. Phase 13 adds semantic landmarks, a Skip to conversation link, strong visible focus indicators, explicit labels and error associations, polite status announcements, keyboard focus restoration, clearer destructive-action confirmations, AA-oriented contrast fixes, responsive reflow improvements, and reduced-motion CSS.
+
+The UI is designed and tested toward WCAG 2.2 Level AA where applicable, but it is not formally certified. Validate packaged `pywebview` behavior manually with Windows keyboard navigation and Narrator before freezing a desktop release. See `docs/accessibility.md` for the full checklist and NVDA follow-up guidance.
 
 ## Running From Source
 
@@ -307,3 +314,5 @@ Compatibility:
 - Run backend tests.
 - Run frontend lint.
 - Run frontend build.
+- Run frontend accessibility checks.
+- Verify Skip to conversation, focus rings, forms, settings, chat, documents, and memory controls in packaged `pywebview`.
