@@ -1,29 +1,39 @@
 import { useEffect, useRef, useState } from 'react'
 import './App.css'
-import { login } from './api/auth'
+import { login, register } from './api/auth'
 import { sendChat } from './api/chat'
 import {
   deleteConversation,
   getConversation,
   listConversations,
 } from './api/conversations'
+import {
+  getDesktopStatus,
+  getOpenAIKeyStatus,
+  removeOpenAIKey,
+  saveOpenAIKey,
+  testOpenAIKey,
+} from './api/desktop'
 import { listDocuments, uploadDocument } from './api/documents'
 import { getHealth } from './api/health'
 import { ApiError } from './api/http'
 import { createMemory, deleteMemory, listMemories } from './api/memories'
 import type {
   ConversationSummary,
+  DesktopStatusResponse,
   DocumentResponse,
   KnowledgeMode,
   MemoryMode,
   MemoryResponse,
   Message,
+  SecretStatusResponse,
 } from './api/types'
 import { ChatInput } from './components/ChatInput'
 import { ChatMessage } from './components/ChatMessage'
 import { ConversationSidebar } from './components/ConversationSidebar'
 import { DocumentList } from './components/DocumentList'
 import { DocumentUpload } from './components/DocumentUpload'
+import { DesktopSettings } from './components/DesktopSettings'
 import { KnowledgeModeSelector } from './components/KnowledgeModeSelector'
 import { LoginForm } from './components/LoginForm'
 import { MemoryModeSelector } from './components/MemoryModeSelector'
@@ -41,6 +51,8 @@ function App() {
   const [conversations, setConversations] = useState<ConversationSummary[]>([])
   const [documents, setDocuments] = useState<DocumentResponse[]>([])
   const [memories, setMemories] = useState<MemoryResponse[]>([])
+  const [desktopStatus, setDesktopStatus] = useState<DesktopStatusResponse | null>(null)
+  const [openAIKeyStatus, setOpenAIKeyStatus] = useState<SecretStatusResponse | null>(null)
   const [knowledgeMode, setKnowledgeMode] = useState<KnowledgeMode>('auto')
   const [memoryMode, setMemoryMode] = useState<MemoryMode>('auto')
   const [loginError, setLoginError] = useState<string | null>(null)
@@ -49,6 +61,8 @@ function App() {
   const [documentError, setDocumentError] = useState<string | null>(null)
   const [memoryError, setMemoryError] = useState<string | null>(null)
   const [uploadError, setUploadError] = useState<string | null>(null)
+  const [desktopSettingsError, setDesktopSettingsError] = useState<string | null>(null)
+  const [desktopValidationMessage, setDesktopValidationMessage] = useState<string | null>(null)
   const [isLoggingIn, setIsLoggingIn] = useState(false)
   const [isSendingMessage, setIsSendingMessage] = useState(false)
   const [isLoadingConversations, setIsLoadingConversations] = useState(false)
@@ -59,6 +73,7 @@ function App() {
   const [isUploadingDocument, setIsUploadingDocument] = useState(false)
   const [isCreatingMemory, setIsCreatingMemory] = useState(false)
   const [isDeletingMemory, setIsDeletingMemory] = useState(false)
+  const [isSavingDesktopSettings, setIsSavingDesktopSettings] = useState(false)
   const isSendingMessageRef = useRef(false)
 
   useEffect(() => {
@@ -73,6 +88,32 @@ function App() {
       .catch(() => {
         if (isMounted) {
           setBackendStatus('unavailable')
+        }
+      })
+
+    return () => {
+      isMounted = false
+    }
+  }, [])
+
+  useEffect(() => {
+    let isMounted = true
+
+    getDesktopStatus()
+      .then(async (status) => {
+        if (!isMounted) {
+          return
+        }
+        setDesktopStatus(status)
+        const secretStatus = await getOpenAIKeyStatus()
+        if (isMounted) {
+          setOpenAIKeyStatus(secretStatus)
+        }
+      })
+      .catch(() => {
+        if (isMounted) {
+          setDesktopStatus(null)
+          setOpenAIKeyStatus(null)
         }
       })
 
@@ -138,6 +179,29 @@ function App() {
       setUploadError(null)
     } catch (error) {
       setLoginError(getLoginErrorText(error))
+    } finally {
+      setIsLoggingIn(false)
+    }
+  }
+
+  async function handleRegister(email: string, password: string) {
+    setIsLoggingIn(true)
+    setLoginError(null)
+
+    try {
+      await register({ email, name: email, password })
+      const tokenResponse = await login({ email, password })
+      storeAccessToken(tokenResponse.access_token)
+      setAccessToken(tokenResponse.access_token)
+      setConversationId(null)
+      setMessages([])
+      setChatError(null)
+      setConversationError(null)
+      setDocumentError(null)
+      setMemoryError(null)
+      setUploadError(null)
+    } catch (error) {
+      setLoginError(getRegisterErrorText(error))
     } finally {
       setIsLoggingIn(false)
     }
@@ -354,6 +418,55 @@ function App() {
     }
   }
 
+  async function handleSaveOpenAIKey(apiKey: string): Promise<boolean> {
+    setIsSavingDesktopSettings(true)
+    setDesktopSettingsError(null)
+    setDesktopValidationMessage(null)
+
+    try {
+      const status = await saveOpenAIKey(apiKey)
+      setOpenAIKeyStatus(status)
+      setDesktopValidationMessage('OpenAI API key saved securely.')
+      return true
+    } catch (error) {
+      setDesktopSettingsError(getDesktopSettingsErrorText(error))
+      return false
+    } finally {
+      setIsSavingDesktopSettings(false)
+    }
+  }
+
+  async function handleRemoveOpenAIKey() {
+    setIsSavingDesktopSettings(true)
+    setDesktopSettingsError(null)
+    setDesktopValidationMessage(null)
+
+    try {
+      const status = await removeOpenAIKey()
+      setOpenAIKeyStatus(status)
+      setDesktopValidationMessage('OpenAI API key removed.')
+    } catch (error) {
+      setDesktopSettingsError(getDesktopSettingsErrorText(error))
+    } finally {
+      setIsSavingDesktopSettings(false)
+    }
+  }
+
+  async function handleTestOpenAIKey() {
+    setIsSavingDesktopSettings(true)
+    setDesktopSettingsError(null)
+    setDesktopValidationMessage(null)
+
+    try {
+      const result = await testOpenAIKey()
+      setDesktopValidationMessage(result.message)
+    } catch (error) {
+      setDesktopSettingsError(getDesktopSettingsErrorText(error))
+    } finally {
+      setIsSavingDesktopSettings(false)
+    }
+  }
+
   async function handleSubmitMessage(content: string) {
     if (!accessToken || isSendingMessageRef.current) {
       return
@@ -424,6 +537,19 @@ function App() {
           ) : null}
         </div>
       </header>
+
+      {desktopStatus ? (
+        <DesktopSettings
+          desktopStatus={desktopStatus}
+          keyStatus={openAIKeyStatus}
+          isSaving={isSavingDesktopSettings}
+          error={desktopSettingsError}
+          validationMessage={desktopValidationMessage}
+          onSaveKey={handleSaveOpenAIKey}
+          onRemoveKey={handleRemoveOpenAIKey}
+          onTestKey={handleTestOpenAIKey}
+        />
+      ) : null}
 
       {accessToken ? (
         <section className="workspace-panel" aria-label="Assistant workspace">
@@ -511,7 +637,13 @@ function App() {
           </div>
         </section>
       ) : (
-        <LoginForm error={loginError} isSubmitting={isLoggingIn} onSubmit={handleLogin} />
+        <LoginForm
+          error={loginError}
+          isSubmitting={isLoggingIn}
+          onClearError={() => setLoginError(null)}
+          onRegister={handleRegister}
+          onSubmit={handleLogin}
+        />
       )}
     </main>
   )
@@ -577,6 +709,26 @@ function getLoginErrorText(error: unknown): string {
   return 'Unable to sign in. Check your credentials and try again.'
 }
 
+function getRegisterErrorText(error: unknown): string {
+  if (isNetworkError(error)) {
+    return 'Cannot reach the backend. Try again shortly.'
+  }
+
+  if (error instanceof ApiError && error.status === 409) {
+    return 'An account with that email already exists.'
+  }
+
+  if (error instanceof ApiError && error.status === 422) {
+    return 'Check your email and password, then try again.'
+  }
+
+  if (error instanceof ApiError) {
+    return 'Unable to create account. Try again.'
+  }
+
+  return 'Unable to create account. Try again.'
+}
+
 function getChatErrorText(error: unknown): string {
   if (isNetworkError(error)) {
     return 'Cannot reach the backend. Your conversation was kept.'
@@ -623,6 +775,18 @@ function getMemoryErrorText(error: unknown): string {
   }
 
   return 'Unable to update memories. Try again.'
+}
+
+function getDesktopSettingsErrorText(error: unknown): string {
+  if (isNetworkError(error)) {
+    return 'Cannot reach the local backend. Try again shortly.'
+  }
+
+  if (error instanceof ApiError) {
+    return error.message
+  }
+
+  return 'Unable to update desktop settings.'
 }
 
 function isAuthenticationError(error: unknown): boolean {

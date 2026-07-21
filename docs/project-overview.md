@@ -2,9 +2,37 @@
 
 ## Purpose
 
-Personal AI Assistant is being developed into a modular personal AI operating system. The current project includes a frozen Backend Core v1 API, Knowledge/RAG v1, Long-Term Memory v1, and a React frontend for authenticated chat with document-backed retrieval and manually saved memories. The backend includes authenticated chat, user-owned memory and documents, RAG, lightweight agent orchestration, and deterministic multi-model provider routing.
+Personal AI Assistant is being developed into a modular personal AI operating system. The current project includes a frozen Backend Core v1 API, Knowledge/RAG v1, Long-Term Memory v1, a React frontend for authenticated chat with document-backed retrieval and manually saved memories, and Windows Desktop Application v1. The backend includes authenticated chat, user-owned memory and documents, RAG, lightweight agent orchestration, deterministic multi-model provider routing, and a local desktop mode that does not require a public server.
 
 Backend Core v1 remains frozen. The frontend integrates with its existing API contracts and does not require incompatible backend application changes.
+
+## Windows Desktop Application v1
+
+Desktop v1 packages the existing React/Vite frontend and FastAPI backend into a Windows-focused local app. The user launches:
+
+```text
+dist\PersonalAIAssistant\PersonalAIAssistant.exe
+```
+
+or runs from source:
+
+```cmd
+.\.conda\python.exe -m desktop.main
+```
+
+The desktop launcher resolves `%LOCALAPPDATA%\PersonalAIAssistant`, loads settings and secrets, selects a loopback port, starts FastAPI on `127.0.0.1`, waits for readiness, opens a `pywebview` window, and shuts the backend down when the window closes.
+
+Desktop mode defaults to SQLite at `%LOCALAPPDATA%\PersonalAIAssistant\database\assistant.sqlite3`. PostgreSQL and pgvector remain the default server/cloud path. SQLite stores document embeddings as JSON and uses Python cosine retrieval for personal-scale knowledge search.
+
+OpenAI remains the default AI provider. Desktop v1 still requires internet access for OpenAI API requests and does not include local AI models. The OpenAI API key is stored through Windows Credential Manager via Python `keyring`.
+
+Build command:
+
+```cmd
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\build_desktop.ps1
+```
+
+Detailed architecture, backup, limitations, and manual test checklist live in `docs/desktop-application.md`.
 
 ## Current Backend
 

@@ -10,6 +10,8 @@ Personal AI Assistant deploys as three portable services:
 
 Alembic owns schema migrations. Uploaded original files are not persisted; the database stores document metadata, extracted chunks, and embeddings.
 
+Windows Desktop Application v1 is a separate local packaging path. It does not require a public backend, Docker, PostgreSQL, or nginx for desktop use. See `docs/desktop-application.md` for the pywebview, SQLite, Credential Manager, and PyInstaller workflow.
+
 ## Production Prerequisites
 
 - Python 3.12 compatible runtime for the backend.

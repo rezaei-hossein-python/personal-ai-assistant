@@ -91,6 +91,100 @@ body {
   outline: 3px solid rgb(26 115 232 / 16%);
 }
 
+.desktop-settings {
+  display: grid;
+  width: min(100%, 1040px);
+  gap: 12px;
+  padding: 16px;
+  margin: 0 auto 20px;
+  border: 1px solid #d6dce5;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 18px 45px rgb(40 49 65 / 8%);
+}
+
+.desktop-settings h2 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.desktop-settings p {
+  margin: 6px 0 0;
+  color: #5f6368;
+  line-height: 1.4;
+}
+
+.desktop-settings dl {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 16px;
+  margin: 12px 0 0;
+}
+
+.desktop-settings dl div {
+  min-width: 0;
+}
+
+.desktop-settings dt {
+  color: #5f6368;
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.desktop-settings dd {
+  margin: 2px 0 0;
+  overflow-wrap: anywhere;
+  font-size: 0.86rem;
+}
+
+.desktop-settings__key-form {
+  display: grid;
+  gap: 7px;
+}
+
+.desktop-settings__key-form label {
+  font-weight: 700;
+}
+
+.desktop-settings__key-form div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
+  gap: 8px;
+}
+
+.desktop-settings__key-form input,
+.desktop-settings__key-form button {
+  min-height: 36px;
+  border: 1px solid #c9d1dd;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #202124;
+  font: inherit;
+}
+
+.desktop-settings__key-form input {
+  min-width: 0;
+  padding: 0 10px;
+}
+
+.desktop-settings__key-form button {
+  padding: 0 12px;
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.desktop-settings__key-form button:disabled,
+.desktop-settings__key-form input:disabled {
+  background: #f1f3f6;
+  color: #6f7782;
+  cursor: not-allowed;
+}
+
+.desktop-settings__message {
+  color: #137333;
+  font-weight: 700;
+}
+
 .workspace-panel {
   display: grid;
   width: min(100%, 1180px);
@@ -549,6 +643,23 @@ body {
   cursor: not-allowed;
 }
 
+.login-form__secondary-button {
+  min-height: 40px;
+  border: 1px solid #c9d1dd;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #1a73e8;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 700;
+}
+
+.login-form__secondary-button:disabled {
+  background: #f1f3f6;
+  color: #6f7782;
+  cursor: not-allowed;
+}
+
 .form-error,
 .chat-error {
   margin: 0;
@@ -801,6 +912,8 @@ body {
   .knowledge-panel__controls,
   .memory-form,
   .memory-form__fields,
+  .desktop-settings dl,
+  .desktop-settings__key-form div,
   .memory-list__item,
   .document-list__item {
     grid-template-columns: 1fr;

@@ -2,7 +2,7 @@
 
 ## Overview
 
-Personal AI Assistant is an early-stage personal AI operating system. The current system includes a frozen Backend Core v1 FastAPI API, Frontend v1, Knowledge/RAG v1, Long-Term Memory v1, Conversation History v1, Actions & Tools v1, and Phase 11 Deployment and Production Hardening v1. The backend supports authenticated chat, message history, memory management, document ingestion, RAG, lightweight agent orchestration, deterministic multi-model provider routing, production configuration validation, migrations, health/readiness checks, container builds, and CI validation.
+Personal AI Assistant is an early-stage personal AI operating system. The current system includes a frozen Backend Core v1 FastAPI API, Frontend v1, Knowledge/RAG v1, Long-Term Memory v1, Conversation History v1, Actions & Tools v1, Phase 11 Deployment and Production Hardening v1, and Phase 12 Windows Desktop Application v1. The backend supports authenticated chat, message history, memory management, document ingestion, RAG, lightweight agent orchestration, deterministic multi-model provider routing, production configuration validation, migrations, health/readiness checks, container builds, CI validation, and a local Windows desktop mode.
 
 ## Current Architecture
 
@@ -49,8 +49,8 @@ Services
   Memory and document CRUD
 
 Database
-  PostgreSQL
-  pgvector required for semantic search
+  PostgreSQL + pgvector for development/cloud semantic search
+  SQLite desktop mode with Python cosine retrieval
   SQLAlchemy ORM
   Alembic migrations
 
@@ -137,11 +137,41 @@ ACCESS_TOKEN_EXPIRE_MINUTES=60
 DATABASE_URL=postgresql+psycopg2://username:password@localhost:5432/personal_ai
 ```
 
-PostgreSQL is the expected database. SQLite is only supported for tests with `APP_ENV=test`.
+PostgreSQL is the expected database for browser/server development and cloud deployment. SQLite is supported for tests with `APP_ENV=test` and for Windows desktop mode with `DESKTOP_MODE=true` and `DATABASE_BACKEND=sqlite`.
 
 Production uses the typed settings in `app/config.py`. Set `APP_ENV=production`, `DEBUG=false`, a strong `JWT_SECRET_KEY`, exact `ALLOWED_ORIGINS`, exact `TRUSTED_HOSTS`, and `API_DOCS_ENABLED=false`. Missing production secrets fail startup clearly.
 
-Semantic document search requires PostgreSQL with the `vector` extension available. Knowledge/RAG v1 stores embeddings in `document_chunks.embedding vector(1536)` and uses pgvector cosine similarity retrieval. SQLite is used only in tests, where cosine distance is calculated in Python to keep coverage deterministic.
+Semantic document search in PostgreSQL mode requires the `vector` extension. Knowledge/RAG v1 stores embeddings in `document_chunks.embedding vector(1536)` and uses pgvector cosine similarity retrieval. SQLite desktop mode stores embeddings as JSON and calculates cosine distance in Python for personal-scale document collections.
+
+## Windows Desktop Application v1
+
+Desktop v1 runs the existing backend and frontend locally without a public server:
+
+```cmd
+.\.conda\python.exe -m desktop.main
+```
+
+Build the portable Windows package:
+
+```cmd
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\build_desktop.ps1
+```
+
+Output:
+
+```text
+dist\PersonalAIAssistant\PersonalAIAssistant.exe
+```
+
+Desktop mode uses `pywebview`, starts FastAPI automatically on `127.0.0.1` with an automatically selected port, serves the compiled React bundle locally, and stops the backend when the desktop window closes. Mutable desktop data is stored under:
+
+```text
+%LOCALAPPDATA%\PersonalAIAssistant
+```
+
+OpenAI remains the default AI provider. Internet access is still required for OpenAI API requests, and usage may cost money. The OpenAI API key is stored through Windows Credential Manager via Python `keyring`; it is not embedded in frontend JavaScript or packaged resources.
+
+See [Desktop Application Guide](docs/desktop-application.md) for architecture, packaging, backup, troubleshooting, limitations, and the manual regression checklist.
 
 ## Model Providers
 

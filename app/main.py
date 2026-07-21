@@ -1,16 +1,19 @@
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from app.config import settings
 from app.core.logging import RequestLoggingMiddleware, logger, setup_logging
-from app.database.database import wait_for_database
+from app.database.database import initialize_desktop_database, wait_for_database
 from app.routers.auth import router as auth_router
 from app.routers.chat import router as chat_router
 from app.routers.conversations import router as conversations_router
+from app.routers.desktop import router as desktop_router
 from app.routers.documents import router as documents_router
 from app.routers.health import router as health_router
 from app.routers.memories import router as memories_router
@@ -26,6 +29,7 @@ async def lifespan(app: FastAPI):
         settings.APP_VERSION,
         settings.APP_ENV,
     )
+    initialize_desktop_database()
     wait_for_database()
     try:
         yield
@@ -81,11 +85,12 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
     return JSONResponse(status_code=500, content={"detail": detail})
 
 
-@app.get("/")
-def home():
-    return {
-        "message": "Personal AI Assistant API is running"
-    }
+if not settings.DESKTOP_MODE:
+    @app.get("/")
+    def home():
+        return {
+            "message": "Personal AI Assistant API is running"
+        }
 
 
 app.include_router(health_router)
@@ -94,3 +99,32 @@ app.include_router(chat_router)
 app.include_router(conversations_router)
 app.include_router(documents_router)
 app.include_router(memories_router)
+
+if settings.DESKTOP_MODE:
+    app.include_router(health_router, prefix="/api")
+    app.include_router(auth_router, prefix="/api")
+    app.include_router(chat_router, prefix="/api")
+    app.include_router(conversations_router, prefix="/api")
+    app.include_router(documents_router, prefix="/api")
+    app.include_router(memories_router, prefix="/api")
+    app.include_router(desktop_router, prefix="/api")
+    _frontend_dir = Path(settings.DESKTOP_FRONTEND_DIR)
+    _index_file = _frontend_dir / "index.html"
+    if not _index_file.exists():
+        raise RuntimeError(
+            "Desktop frontend bundle is missing. Run npm.cmd run build in frontend."
+        )
+    _assets_dir = _frontend_dir / "assets"
+    if _assets_dir.exists():
+        app.mount("/assets", StaticFiles(directory=str(_assets_dir)), name="assets")
+
+    @app.get("/{path:path}", include_in_schema=False)
+    def desktop_frontend(path: str):
+        requested = (_frontend_dir / path).resolve()
+        if (
+            requested.is_file()
+            and _frontend_dir.resolve() in requested.parents
+            and requested.name != ".env"
+        ):
+            return FileResponse(requested)
+        return FileResponse(_index_file)

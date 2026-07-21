@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 import pytest
 from sqlalchemy import inspect, text
 from sqlalchemy.exc import IntegrityError
+from fastapi import FastAPI
 
 from app.config import Settings, settings
 from app.database.database import Base, SessionLocal, engine
@@ -37,6 +38,10 @@ from app.agents.types import ActionRequest, Intent, Plan
 from app.agents.action_agent import ActionAgent
 from app.tools import ToolContext, ToolRegistry, build_default_tool_registry
 from app.tools.internal_tools import INTERNAL_TOOLS
+from desktop.lifecycle import configure_desktop_environment, select_loopback_port, wait_for_readiness
+from desktop.paths import ensure_desktop_directories, resolve_desktop_paths
+from desktop.settings import DesktopSettings, load_desktop_settings, save_desktop_settings
+from desktop.secrets import DesktopSecretService
 
 
 def make_docx_bytes(text: str) -> bytes:
@@ -2285,3 +2290,136 @@ def test_embedding_backfill_idempotency(client):
     assert first_result.failed_count == 0
     assert second_result.updated_count == 0
     assert second_result.skipped_count == 1
+
+
+def test_desktop_path_resolution_creates_expected_directories(tmp_path):
+    paths = resolve_desktop_paths(tmp_path / "DesktopData")
+    ensure_desktop_directories(paths)
+
+    assert paths.data_dir.exists()
+    assert paths.database_dir.exists()
+    assert paths.logs_dir.exists()
+    assert paths.cache_dir.exists()
+    assert paths.temp_dir.exists()
+    assert paths.backups_dir.exists()
+    assert paths.sqlite_database.parent == paths.database_dir
+
+
+def test_desktop_settings_round_trip(tmp_path):
+    paths = resolve_desktop_paths(tmp_path / "DesktopData")
+    ensure_desktop_directories(paths)
+    configured = DesktopSettings(window_width=1100, window_height=700)
+
+    save_desktop_settings(paths, configured)
+    loaded = load_desktop_settings(paths)
+
+    assert loaded.window_width == 1100
+    assert loaded.window_height == 700
+    assert loaded.database_backend == "sqlite"
+
+
+class InMemorySecretService(DesktopSecretService):
+    def __init__(self):
+        self.values = {}
+
+    def get_secret(self, name: str) -> str | None:
+        return self.values.get(name)
+
+    def set_secret(self, name: str, value: str) -> None:
+        self.values[name] = value
+
+    def delete_secret(self, name: str) -> None:
+        self.values.pop(name, None)
+
+
+def test_desktop_secret_service_interface_with_mock():
+    service = InMemorySecretService()
+
+    assert not service.has_secret("OPENAI_API_KEY")
+    service.set_secret("OPENAI_API_KEY", "sk-test")
+    assert service.has_secret("OPENAI_API_KEY")
+    assert service.get_secret("OPENAI_API_KEY") == "sk-test"
+    service.delete_secret("OPENAI_API_KEY")
+    assert not service.has_secret("OPENAI_API_KEY")
+
+
+def test_desktop_startup_configuration_is_loopback_and_sqlite(tmp_path, monkeypatch):
+    paths = resolve_desktop_paths(tmp_path / "DesktopData")
+    ensure_desktop_directories(paths)
+    secret_service = InMemorySecretService()
+    secret_service.set_secret("OPENAI_API_KEY", "sk-test")
+
+    port = configure_desktop_environment(
+        paths=paths,
+        settings=DesktopSettings(),
+        secret_service=secret_service,
+        port=54321,
+    )
+
+    assert port == 54321
+    assert os.environ["API_HOST"] == "127.0.0.1"
+    assert os.environ["DATABASE_BACKEND"] == "sqlite"
+    assert os.environ["DATABASE_URL"].startswith("sqlite:///")
+    assert os.environ["OPENAI_API_KEY"] == "sk-test"
+    assert "JWT_SECRET_KEY" in secret_service.values
+
+
+def test_select_loopback_port_returns_available_port():
+    port = select_loopback_port()
+
+    assert isinstance(port, int)
+    assert port > 0
+
+
+def test_wait_for_readiness_uses_bounded_retries(monkeypatch):
+    attempts = []
+
+    def unavailable(*args, **kwargs):
+        attempts.append((args, kwargs))
+        raise RuntimeError("unavailable")
+
+    monkeypatch.setattr("desktop.lifecycle.httpx.get", unavailable)
+
+    with pytest.raises(RuntimeError, match="did not become ready"):
+        wait_for_readiness("http://127.0.0.1:1", attempts=2, delay_seconds=0.01)
+
+    assert len(attempts) == 2
+
+
+def test_desktop_secret_api_does_not_return_full_secret(monkeypatch):
+    from app.routers import desktop as desktop_router_module
+
+    secret_service = InMemorySecretService()
+
+    monkeypatch.setattr(settings, "DESKTOP_MODE", True)
+    monkeypatch.setattr(settings, "OPENAI_API_KEY", "")
+    monkeypatch.setattr(
+        desktop_router_module,
+        "DesktopSecretService",
+        lambda: secret_service,
+    )
+
+    test_app = FastAPI()
+    test_app.include_router(desktop_router_module.router, prefix="/api")
+    with TestClient(test_app) as desktop_client:
+        save_response = desktop_client.put(
+            "/api/desktop/secrets/openai",
+            json={"api_key": "sk-secret-value"},
+        )
+        status_response = desktop_client.get("/api/desktop/secrets/openai")
+
+    assert save_response.status_code == 200
+    assert status_response.status_code == 200
+    assert "sk-secret-value" not in save_response.text
+    assert "sk-secret-value" not in status_response.text
+    assert status_response.json() == {
+        "configured": True,
+        "masked": "sk-...alue",
+    }
+
+
+def test_sqlite_foreign_keys_are_enabled():
+    with engine.connect() as connection:
+        enabled = connection.execute(text("PRAGMA foreign_keys")).scalar()
+
+    assert enabled == 1

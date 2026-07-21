@@ -12,6 +12,11 @@ class Settings(BaseSettings):
     DEBUG: bool = False
     API_HOST: str = "127.0.0.1"
     API_PORT: int = 8000
+    DESKTOP_MODE: bool = False
+    DESKTOP_DATA_DIR: str = ""
+    DESKTOP_LOG_DIR: str = ""
+    DESKTOP_FRONTEND_DIR: str = ""
+    DATABASE_BACKEND: str = "postgres"
 
     OPENAI_API_KEY: str = ""
     OPENAI_MODEL: str = "gpt-4.1-mini"
@@ -52,6 +57,7 @@ class Settings(BaseSettings):
     DB_CONNECT_TIMEOUT_SECONDS: int = 10
     DB_STARTUP_RETRY_ATTEMPTS: int = 5
     DB_STARTUP_RETRY_DELAY_SECONDS: int = 2
+    DESKTOP_SCHEMA_VERSION: int = 1
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -84,6 +90,17 @@ class Settings(BaseSettings):
             raise ValueError(f"LOG_LEVEL must be one of {', '.join(sorted(allowed))}")
         return normalized
 
+    @field_validator("DATABASE_BACKEND")
+    @classmethod
+    def validate_database_backend(cls, value: str) -> str:
+        normalized = value.lower()
+        allowed = {"postgres", "sqlite"}
+        if normalized not in allowed:
+            raise ValueError(
+                f"DATABASE_BACKEND must be one of {', '.join(sorted(allowed))}"
+            )
+        return normalized
+
     @model_validator(mode="after")
     def normalize_aliases(self):
         if self.JWT_SECRET_KEY:
@@ -109,6 +126,15 @@ class Settings(BaseSettings):
             raise RuntimeError("MAX_UPLOAD_BYTES must be greater than zero")
         if self.DB_STARTUP_RETRY_ATTEMPTS < 1:
             raise RuntimeError("DB_STARTUP_RETRY_ATTEMPTS must be at least 1")
+
+        if self.DESKTOP_MODE:
+            if self.API_HOST != "127.0.0.1":
+                raise RuntimeError("Desktop mode must bind API_HOST to 127.0.0.1")
+            if self.DATABASE_BACKEND != "sqlite":
+                raise RuntimeError("Desktop mode requires DATABASE_BACKEND=sqlite")
+            if "*" in self.ALLOWED_ORIGINS:
+                raise RuntimeError("Desktop mode cannot use wildcard CORS")
+            return
 
         if not self.is_production:
             return

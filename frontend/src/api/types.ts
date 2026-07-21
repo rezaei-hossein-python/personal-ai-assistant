@@ -119,6 +119,18 @@ export interface LoginRequest {
   password: string
 }
 
+export interface RegisterRequest {
+  email: string
+  name: string
+  password: string
+}
+
+export interface UserResponse {
+  id: number
+  email: string
+  name: string
+}
+
 export interface TokenResponse {
   access_token: string
   token_type: string
@@ -142,4 +154,25 @@ export interface ConversationSummary {
 
 export interface ConversationDetail extends ConversationSummary {
   messages: ConversationMessage[]
+}
+
+export interface DesktopStatusResponse {
+  desktop_mode: boolean
+  app_version: string
+  data_directory: string
+  logs_directory: string
+  database_backend: string
+  backend_status: string
+  openai_api_key_configured: boolean
+}
+
+export interface SecretStatusResponse {
+  configured: boolean
+  masked: string | null
+}
+
+export interface TestOpenAIKeyResponse {
+  configured: boolean
+  valid: boolean
+  message: string
 }
