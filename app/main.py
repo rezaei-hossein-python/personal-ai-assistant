@@ -1,10 +1,13 @@
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from app.config import settings
-from app.core.logging import setup_logging
-from app.database.database import check_database_connection
+from app.core.logging import RequestLoggingMiddleware, logger, setup_logging
+from app.database.database import wait_for_database
 from app.routers.auth import router as auth_router
 from app.routers.chat import router as chat_router
 from app.routers.conversations import router as conversations_router
@@ -16,8 +19,18 @@ from app.routers.memories import router as memories_router
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     setup_logging()
-    check_database_connection()
-    yield
+    settings.validate_for_startup()
+    logger.info(
+        "Starting %s version=%s env=%s",
+        settings.APP_NAME,
+        settings.APP_VERSION,
+        settings.APP_ENV,
+    )
+    wait_for_database()
+    try:
+        yield
+    finally:
+        logger.info("Shutting down %s", settings.APP_NAME)
 
 
 app = FastAPI(
@@ -25,7 +38,47 @@ app = FastAPI(
     version=settings.APP_VERSION,
     description="An AI-powered personal knowledge management system",
     lifespan=lifespan,
+    docs_url="/docs" if settings.API_DOCS_ENABLED else None,
+    redoc_url="/redoc" if settings.API_DOCS_ENABLED else None,
+    openapi_url="/openapi.json" if settings.API_DOCS_ENABLED else None,
 )
+
+app.add_middleware(RequestLoggingMiddleware)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.ALLOWED_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-Request-ID"],
+)
+if settings.TRUSTED_HOSTS:
+    app.add_middleware(
+        TrustedHostMiddleware,
+        allowed_hosts=settings.TRUSTED_HOSTS,
+    )
+
+
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    return response
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    logger.exception(
+        "Unhandled application exception request_id=%s path=%s",
+        request.headers.get("x-request-id", "-"),
+        request.url.path,
+    )
+    detail = str(exc) if settings.DEBUG and not settings.is_production else (
+        "Internal server error"
+    )
+    return JSONResponse(status_code=500, content={"detail": detail})
 
 
 @app.get("/")

@@ -55,7 +55,10 @@ def _base64url_decode(data: str) -> bytes:
 def create_access_token(user_id: int) -> str:
     now = datetime.now(timezone.utc)
     expires_at = now + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
-    header = {"alg": "HS256", "typ": "JWT"}
+    if settings.JWT_ALGORITHM != "HS256":
+        raise RuntimeError("Only HS256 JWT tokens are supported")
+
+    header = {"alg": settings.JWT_ALGORITHM, "typ": "JWT"}
     payload = {
         "sub": str(user_id),
         "iat": int(now.timestamp()),
@@ -95,6 +98,9 @@ def decode_access_token(token: str) -> int:
             raise ValueError("Invalid token signature")
 
         payload = json.loads(_base64url_decode(encoded_payload))
+        header = json.loads(_base64url_decode(encoded_header))
+        if header.get("alg") != settings.JWT_ALGORITHM:
+            raise ValueError("Invalid token algorithm")
         expires_at = int(payload["exp"])
         if expires_at < int(datetime.now(timezone.utc).timestamp()):
             raise ValueError("Token expired")

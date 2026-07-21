@@ -110,10 +110,10 @@ http://localhost:5173
 
 1. The user signs in with email and password.
 2. The frontend posts credentials to `POST /auth/login`.
-3. On success, the returned JWT access token is stored in React component state only.
+3. On success, the returned JWT access token is stored in React component state and browser local storage.
 4. The token is sent as `Authorization: Bearer <token>` for chat and document requests.
 
-The access token is stored in memory only. It is not written to local storage, session storage, cookies, or any persistent browser storage.
+The access token is persisted in local storage so browser refresh can reload conversations, documents, and memories without an immediate login prompt. Logout and `401` session expiry clear the stored token. Do not render unsafe raw HTML in this app; local-storage tokens are exposed to future XSS bugs.
 
 ## Logout And Session Cleanup
 
@@ -211,6 +211,15 @@ The ID is cleared on logout and on authentication expiry. Frontend v1 does not l
 Run from `frontend/`:
 
 ```bash
+npm.cmd ci
 npm.cmd run lint
 npm.cmd run build
 ```
+
+Production builds can set:
+
+```text
+VITE_API_BASE_URL=https://api.example.com
+```
+
+Do not put secrets in `VITE_` variables.

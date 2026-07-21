@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.database.database import get_db
 from app.dependencies import get_current_embedding_provider, get_current_user
 from app.models.document import Document
@@ -15,12 +16,14 @@ from app.services.document_service import (
     delete_document,
     get_document,
     list_documents,
+    sanitize_filename,
 )
 from app.services.embedding_service import EmbeddingProvider
 from app.services.retrieval_service import (
     VectorSearchUnavailableError,
     retrieve_relevant_chunks,
 )
+from app.services.text_extraction_service import TextExtractionError, detect_document_type
 
 
 router = APIRouter(prefix="/documents", tags=["documents"])
@@ -52,12 +55,27 @@ async def upload_document(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Uploaded file is empty",
         )
+    if len(file_bytes) > settings.MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+            detail="Uploaded file is too large",
+        )
+
+    filename = sanitize_filename(file.filename or "document")
+    content_type = file.content_type or "application/octet-stream"
+    try:
+        detect_document_type(filename, content_type)
+    except TextExtractionError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Unsupported document type",
+        )
 
     document = create_document_from_upload(
         db=db,
         user_id=current_user.id,
-        filename=file.filename or "document",
-        content_type=file.content_type or "application/octet-stream",
+        filename=filename,
+        content_type=content_type,
         file_bytes=file_bytes,
         embedding_provider=embedding_provider,
     )

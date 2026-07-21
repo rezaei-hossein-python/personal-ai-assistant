@@ -2,7 +2,7 @@
 
 ## Overview
 
-Personal AI Assistant is an early-stage personal AI operating system. The current system includes a frozen Backend Core v1 FastAPI API, Knowledge/RAG v1, Long-Term Memory v1, and a React frontend for authenticated chat with document-backed retrieval and manually saved memories. The backend supports authenticated chat, message history, memory management, document ingestion, RAG, lightweight agent orchestration, and deterministic multi-model provider routing.
+Personal AI Assistant is an early-stage personal AI operating system. The current system includes a frozen Backend Core v1 FastAPI API, Frontend v1, Knowledge/RAG v1, Long-Term Memory v1, Conversation History v1, Actions & Tools v1, and Phase 11 Deployment and Production Hardening v1. The backend supports authenticated chat, message history, memory management, document ingestion, RAG, lightweight agent orchestration, deterministic multi-model provider routing, production configuration validation, migrations, health/readiness checks, container builds, and CI validation.
 
 ## Current Architecture
 
@@ -96,11 +96,12 @@ Chat uses `POST /chat` with a frontend-generated `conversation_id` and message t
 
 On initial app mount, the frontend calls `GET /health` and displays backend status. Network and API failures are shown as user-facing login or chat errors; non-authentication chat failures keep the visible conversation state.
 
-Frontend limitations: sign-in only, no registration UI, memory-only access-token sessions, no streaming responses, no markdown rendering for assistant text, no document preview, and a health check only on initial app mount. Historical messages load role/content/timestamp only because citation and memory metadata are not persisted yet.
+Frontend limitations: sign-in only, access tokens persist in browser local storage for refresh recovery, no server-side token revocation, no streaming responses, no markdown rendering for assistant text, no document preview, and a health check only on initial app mount. Historical messages load role/content/timestamp only because citation and memory metadata are not persisted yet.
 
 ## Requirements
 
 - Python 3.12+
+- Node.js 24 for frontend development/builds
 - PostgreSQL
 - pgvector extension for semantic document search
 - OpenAI API key for the default provider and embeddings
@@ -137,6 +138,8 @@ DATABASE_URL=postgresql+psycopg2://username:password@localhost:5432/personal_ai
 ```
 
 PostgreSQL is the expected database. SQLite is only supported for tests with `APP_ENV=test`.
+
+Production uses the typed settings in `app/config.py`. Set `APP_ENV=production`, `DEBUG=false`, a strong `JWT_SECRET_KEY`, exact `ALLOWED_ORIGINS`, exact `TRUSTED_HOSTS`, and `API_DOCS_ENABLED=false`. Missing production secrets fail startup clearly.
 
 Semantic document search requires PostgreSQL with the `vector` extension available. Knowledge/RAG v1 stores embeddings in `document_chunks.embedding vector(1536)` and uses pgvector cosine similarity retrieval. SQLite is used only in tests, where cosine distance is calculated in Python to keep coverage deterministic.
 
@@ -196,6 +199,12 @@ Health check:
 
 ```bash
 curl http://127.0.0.1:8000/health
+```
+
+Readiness check:
+
+```bash
+curl http://127.0.0.1:8000/ready
 ```
 
 Terminal 2, frontend:
@@ -504,6 +513,51 @@ pytest
 ```
 
 The tests use an isolated SQLite database with `APP_ENV=test` so they do not require a local PostgreSQL server.
+
+## Deployment And Operations
+
+Phase 11 adds provider-neutral deployment artifacts without performing a live deployment:
+
+```text
+Dockerfile.backend
+frontend/Dockerfile
+frontend/nginx.conf
+docker-compose.yml
+.github/workflows/ci.yml
+docs/deployment.md
+```
+
+Production-like local Compose:
+
+```cmd
+docker compose build
+docker compose up -d
+docker compose ps
+docker compose logs -f backend
+docker compose down
+```
+
+Compose URLs:
+
+```text
+Frontend: http://localhost:5173
+Backend API: http://localhost:8000
+API docs: http://localhost:8000/docs
+Health: http://localhost:8000/health
+Readiness: http://localhost:8000/ready
+```
+
+Alembic remains the migration workflow:
+
+```cmd
+.\.conda\python.exe -m alembic current
+.\.conda\python.exe -m alembic upgrade head
+.\.conda\python.exe -m alembic revision --autogenerate -m "description"
+```
+
+`docker compose down -v` deliberately deletes the local container PostgreSQL volume. Backups may contain private memories, chat history, document chunks, and embeddings; encrypt and access-control them.
+
+See [docs/deployment.md](docs/deployment.md) for production prerequisites, environment variables, migration lifecycle, backup/restore commands, security checklist, rollback guidance, and known limitations. The application should not be marked as publicly deployed until a real deployment is completed and verified.
 
 ## Roadmap
 

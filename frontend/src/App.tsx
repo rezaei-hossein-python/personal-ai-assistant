@@ -31,9 +31,11 @@ import { MemorySection } from './components/MemorySection'
 
 type BackendStatus = 'loading' | 'connected' | 'unavailable'
 
+const accessTokenStorageKey = 'personal-ai-assistant.access-token'
+
 function App() {
   const [backendStatus, setBackendStatus] = useState<BackendStatus>('loading')
-  const [accessToken, setAccessToken] = useState<string | null>(null)
+  const [accessToken, setAccessToken] = useState<string | null>(() => getStoredAccessToken())
   const [conversationId, setConversationId] = useState<string | null>(null)
   const [messages, setMessages] = useState<Message[]>([])
   const [conversations, setConversations] = useState<ConversationSummary[]>([])
@@ -79,7 +81,20 @@ function App() {
     }
   }, [])
 
+  useEffect(() => {
+    if (!accessToken) {
+      return
+    }
+
+    void Promise.all([
+      loadConversations(accessToken),
+      loadDocuments(accessToken),
+      loadMemories(accessToken),
+    ])
+  }, [accessToken])
+
   function clearSession() {
+    clearStoredAccessToken()
     isSendingMessageRef.current = false
     setAccessToken(null)
     setConversationId(null)
@@ -112,6 +127,7 @@ function App() {
 
     try {
       const tokenResponse = await login({ email, password })
+      storeAccessToken(tokenResponse.access_token)
       setAccessToken(tokenResponse.access_token)
       setConversationId(null)
       setMessages([])
@@ -120,11 +136,6 @@ function App() {
       setDocumentError(null)
       setMemoryError(null)
       setUploadError(null)
-      await Promise.all([
-        loadConversations(tokenResponse.access_token),
-        loadDocuments(tokenResponse.access_token),
-        loadMemories(tokenResponse.access_token),
-      ])
     } catch (error) {
       setLoginError(getLoginErrorText(error))
     } finally {
@@ -627,6 +638,30 @@ function isMemoryChangingAction(action: { tool_name: string; status: string }): 
     action.status === 'success' &&
     (action.tool_name === 'save_memory' || action.tool_name === 'delete_memory')
   )
+}
+
+function getStoredAccessToken(): string | null {
+  try {
+    return window.localStorage.getItem(accessTokenStorageKey)
+  } catch {
+    return null
+  }
+}
+
+function storeAccessToken(token: string) {
+  try {
+    window.localStorage.setItem(accessTokenStorageKey, token)
+  } catch {
+    // If storage is unavailable, the in-memory session still works.
+  }
+}
+
+function clearStoredAccessToken() {
+  try {
+    window.localStorage.removeItem(accessTokenStorageKey)
+  } catch {
+    // Ignore storage failures during logout/session cleanup.
+  }
 }
 
 export default App

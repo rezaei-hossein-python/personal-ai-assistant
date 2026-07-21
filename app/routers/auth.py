@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
+from app.core.logging import logger
 from app.database.database import get_db
 from app.schemas.auth import TokenResponse, UserCreate, UserLogin, UserResponse
 from app.services.auth_service import create_access_token
@@ -45,9 +46,11 @@ def login(
     )
 
     if user is None:
+        logger.warning("Authentication failed email=%s", request.email)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid email or password",
         )
 
+    logger.info("Authentication succeeded user_id=%s", user.id)
     return TokenResponse(access_token=create_access_token(user.id))

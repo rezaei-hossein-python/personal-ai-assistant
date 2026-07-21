@@ -1,5 +1,6 @@
 from pydantic import ValidationError
 
+from app.core.logging import logger
 from app.tools.internal_tools import INTERNAL_TOOLS
 from app.tools.types import (
     ToolContext,
@@ -39,6 +40,7 @@ class ToolRegistry:
     ) -> tuple[ToolResult, ToolExecutionRecord]:
         tool = self.get(name)
         if tool is None:
+            logger.warning("Tool blocked name=%s user_id=%s", name, context.user_id)
             result = ToolResult(
                 status="error",
                 summary="Tool is not allowed.",
@@ -71,6 +73,7 @@ class ToolRegistry:
                 },
             )
         except Exception:
+            logger.exception("Tool execution failed name=%s user_id=%s", name, context.user_id)
             result = ToolResult(
                 status="error",
                 summary="Tool execution failed.",
@@ -80,6 +83,12 @@ class ToolRegistry:
                 },
             )
 
+        logger.info(
+            "Tool execution completed name=%s user_id=%s status=%s",
+            name,
+            context.user_id,
+            result.status,
+        )
         return result, _record(name, result)
 
 

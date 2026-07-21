@@ -1,10 +1,21 @@
 from app.core.logging import logger
+from app.database.database import check_database_connection
 
 
 def get_system_status():
-    logger.info("Generating system status")
-
     return {
         "application": "Personal AI Assistant",
-        "status": "healthy"
+        "status": "healthy",
+    }
+
+
+def get_readiness_status():
+    logger.info("Checking readiness")
+    check_database_connection()
+    return {
+        "application": "Personal AI Assistant",
+        "status": "ready",
+        "checks": {
+            "database": "ok",
+        },
     }

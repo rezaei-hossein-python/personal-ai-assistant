@@ -11,6 +11,7 @@ import pytest
 from sqlalchemy import inspect, text
 from sqlalchemy.exc import IntegrityError
 
+from app.config import Settings, settings
 from app.database.database import Base, SessionLocal, engine
 from app.dependencies import (
     get_chat_orchestrator,
@@ -180,6 +181,54 @@ def test_health_endpoint(client):
 
     assert response.status_code == 200
     assert response.json()["status"] == "healthy"
+
+
+def test_ready_endpoint_checks_database(client):
+    response = client.get("/ready")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "ready"
+    assert response.json()["checks"]["database"] == "ok"
+
+
+def test_ready_endpoint_returns_503_when_database_unavailable(monkeypatch, client):
+    def unavailable():
+        raise RuntimeError("database unavailable")
+
+    monkeypatch.setattr("app.routers.health.get_readiness_status", unavailable)
+
+    response = client.get("/ready")
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "Application is not ready"
+
+
+def test_settings_parse_allowed_origins_from_comma_string():
+    configured = Settings(
+        APP_ENV="test",
+        DATABASE_URL="sqlite:///./test.db",
+        OPENAI_API_KEY="test-key",
+        ALLOWED_ORIGINS="http://localhost:5173,https://example.com",
+    )
+
+    assert configured.ALLOWED_ORIGINS == [
+        "http://localhost:5173",
+        "https://example.com",
+    ]
+
+
+def test_production_settings_require_secrets():
+    configured = Settings(
+        APP_ENV="production",
+        DATABASE_URL="postgresql+psycopg2://user:pass@localhost/db",
+        OPENAI_API_KEY="",
+        JWT_SECRET_KEY="short",
+        API_DOCS_ENABLED=False,
+        ALLOWED_ORIGINS="https://example.com",
+    )
+
+    with pytest.raises(RuntimeError, match="OPENAI_API_KEY"):
+        configured.validate_for_startup()
 
 
 def register_and_login(
@@ -1303,6 +1352,64 @@ def test_document_upload_and_listing(client):
 
     assert list_response.status_code == 200
     assert len(list_response.json()) == 1
+
+
+def test_document_upload_sanitizes_unsafe_filename(client):
+    token = register_and_login(client)
+
+    upload_response = client.post(
+        "/documents/upload",
+        headers=auth_headers(token),
+        files={
+            "file": (
+                "../unsafe:name.txt",
+                b"Personal knowledge about project architecture.",
+                "text/plain",
+            )
+        },
+    )
+
+    assert upload_response.status_code == 200
+    assert upload_response.json()["original_filename"] == "unsafe_name.txt"
+
+
+def test_document_upload_rejects_unsupported_extension(client):
+    token = register_and_login(client)
+
+    upload_response = client.post(
+        "/documents/upload",
+        headers=auth_headers(token),
+        files={
+            "file": (
+                "notes.exe",
+                b"not a supported document",
+                "application/octet-stream",
+            )
+        },
+    )
+
+    assert upload_response.status_code == 400
+    assert upload_response.json()["detail"] == "Unsupported document type"
+
+
+def test_document_upload_rejects_oversized_file(monkeypatch, client):
+    token = register_and_login(client)
+    monkeypatch.setattr(settings, "MAX_UPLOAD_BYTES", 8)
+
+    upload_response = client.post(
+        "/documents/upload",
+        headers=auth_headers(token),
+        files={
+            "file": (
+                "notes.txt",
+                b"this file is too large",
+                "text/plain",
+            )
+        },
+    )
+
+    assert upload_response.status_code == 413
+    assert upload_response.json()["detail"] == "Uploaded file is too large"
 
 
 @pytest.mark.parametrize(
