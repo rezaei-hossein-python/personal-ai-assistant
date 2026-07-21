@@ -40,9 +40,16 @@ class MemoryRetrievalMetadata(BaseModel):
     sources: list[MemorySource] = Field(default_factory=list)
 
 
+class ActionExecutionMetadata(BaseModel):
+    tool_name: str
+    status: Literal["success", "error"]
+    summary: str
+
+
 class ChatResponseMetadata(BaseModel):
     knowledge: KnowledgeRetrievalMetadata | None = None
     memory: MemoryRetrievalMetadata | None = None
+    actions: list[ActionExecutionMetadata] = Field(default_factory=list)
 
 
 class ChatResponse(BaseModel):

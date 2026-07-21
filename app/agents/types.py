@@ -39,6 +39,13 @@ class ActionResult:
 
 
 @dataclass
+class ActionRequest:
+    tool_name: str
+    arguments: dict
+    explicit_intent: bool = False
+
+
+@dataclass
 class EvaluationResult:
     warnings: list[str]
     metadata: dict

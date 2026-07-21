@@ -18,6 +18,7 @@ from app.services.memory_extractor import extract_memory
 from app.services.memory_service import save_memory
 from app.services.message_service import get_messages, save_message
 from app.services.prompt_service import build_chat_messages
+from app.tools import ToolContext
 
 
 @dataclass
@@ -80,6 +81,30 @@ class ChatOrchestrator:
             knowledge_enabled = False
             plan.use_knowledge = False
 
+        action_result = self.action_agent.prepare_actions(plan, message)
+        if knowledge_retrieval is False:
+            action_result.actions = [
+                action
+                for action in action_result.actions
+                if action.tool_name != "search_knowledge"
+            ]
+        agents_invoked.append(self.action_agent.name)
+        tool_results, tool_executions = self._execute_actions(
+            db=db,
+            user_id=user_id,
+            action_result=action_result,
+            embedding_provider=embedding_provider,
+        )
+
+        if self._has_action(action_result, "list_documents"):
+            knowledge_enabled = False
+            plan.use_knowledge = False
+        if self._has_action(action_result, "list_conversations"):
+            memory_enabled = False
+            knowledge_enabled = False
+            plan.use_memory = False
+            plan.use_knowledge = False
+
         get_or_create_conversation(
             db,
             conversation_id,
@@ -119,16 +144,25 @@ class ChatOrchestrator:
         knowledge_context.metadata["mode"] = knowledge_mode
         agents_invoked.append(self.knowledge_agent.name)
 
-        self.action_agent.prepare_actions(plan)
-        agents_invoked.append(self.action_agent.name)
-
         messages = build_chat_messages(
             message=message,
             history=history,
             memories=memory_context.memories,
             document_chunks=knowledge_context.chunks,
         )
-        if model_router:
+        if tool_results:
+            messages.append(
+                {
+                    "role": "system",
+                    "content": self._format_tool_results_for_prompt(tool_results),
+                }
+            )
+
+        deterministic_response = self._deterministic_tool_response(tool_results)
+        if deterministic_response is not None:
+            response = deterministic_response
+            selected_provider = model_provider
+        elif model_router:
             route = model_router.route(plan, message)
             collaboration_analyses = model_router.collaborate(route, messages)
             if collaboration_analyses:
@@ -223,8 +257,135 @@ class ChatOrchestrator:
                         for memory in memory_context.memories
                     ],
                 },
+                "actions": [
+                    {
+                        "tool_name": execution.name,
+                        "status": execution.status,
+                        "summary": execution.summary,
+                    }
+                    for execution in tool_executions
+                ],
             },
         )
+
+    def _execute_actions(
+        self,
+        db: Session,
+        user_id: int,
+        action_result,
+        embedding_provider: EmbeddingProvider,
+    ) -> tuple[list, list]:
+        tool_results = []
+        tool_executions = []
+        context = ToolContext(
+            db=db,
+            user_id=user_id,
+            embedding_provider=embedding_provider,
+        )
+
+        for action in action_result.actions[: self.action_agent.tool_registry.max_executions]:
+            tool = self.action_agent.tool_registry.get(action.tool_name)
+            if tool is not None and tool.destructive and not action.explicit_intent:
+                result, execution = self.action_agent.tool_registry.execute(
+                    context=context,
+                    name="__blocked_destructive_action__",
+                    arguments={},
+                )
+                execution.name = action.tool_name
+                execution.summary = "Explicit user intent is required."
+                result.summary = execution.summary
+            else:
+                result, execution = self.action_agent.tool_registry.execute(
+                    context=context,
+                    name=action.tool_name,
+                    arguments=action.arguments,
+                )
+            tool_results.append(
+                {
+                    "name": execution.name,
+                    "status": result.status,
+                    "summary": result.summary,
+                    "data": result.data,
+                    "error": result.error,
+                }
+            )
+            tool_executions.append(execution)
+
+        if len(action_result.actions) > self.action_agent.tool_registry.max_executions:
+            tool_executions.append(
+                type(tool_executions[0])(
+                    name="execution_limit",
+                    status="error",
+                    summary="Tool execution limit reached.",
+                    error={
+                        "code": "execution_limit_reached",
+                        "message": "Tool execution limit reached.",
+                    },
+                )
+            )
+
+        return tool_results, tool_executions
+
+    def _format_tool_results_for_prompt(self, tool_results: list[dict]) -> str:
+        safe_results = [
+            {
+                "tool": result["name"],
+                "status": result["status"],
+                "summary": result["summary"],
+                "data": result["data"],
+                "error": result["error"],
+            }
+            for result in tool_results
+        ]
+        return (
+            "Approved internal tool results for this user request:\n"
+            f"{json.dumps(safe_results, default=str)}"
+        )
+
+    def _deterministic_tool_response(self, tool_results: list[dict]) -> str | None:
+        if len(tool_results) != 1:
+            return None
+
+        result = tool_results[0]
+        if result["status"] != "success":
+            return result["summary"]
+
+        name = result["name"]
+        data = result["data"]
+        if name == "save_memory":
+            memory = data["memory"]
+            return f"Saved to memory: {memory['key']} is {memory['value']}."
+        if name == "delete_memory":
+            return "Deleted that memory."
+        if name == "list_memories":
+            memories = data["memories"]
+            if not memories:
+                return "You do not have any saved memories yet."
+            lines = [f"- {memory['key']}: {memory['value']}" for memory in memories]
+            return "Your saved memories:\n" + "\n".join(lines)
+        if name == "list_documents":
+            documents = data["documents"]
+            if not documents:
+                return "You do not have any documents yet."
+            lines = [
+                f"- {document['original_filename']} ({document['processing_status']})"
+                for document in documents
+            ]
+            return "Your documents:\n" + "\n".join(lines)
+        if name == "list_conversations":
+            conversations = data["conversations"]
+            if not conversations:
+                return "You do not have any conversations yet."
+            lines = [
+                f"- {conversation['title']} ({conversation['message_count']} messages)"
+                for conversation in conversations
+            ]
+            return "Your conversations:\n" + "\n".join(lines)
+
+        return None
+
+    def _has_action(self, action_result, tool_name: str) -> bool:
+        return any(action.tool_name == tool_name for action in action_result.actions)
 
     def _extract_and_store_memory(
         self,

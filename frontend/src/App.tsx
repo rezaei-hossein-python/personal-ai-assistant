@@ -377,6 +377,9 @@ function App() {
           metadata: chatResponse.metadata,
         },
       ])
+      if (chatResponse.metadata?.actions?.some(isMemoryChangingAction)) {
+        await loadMemories(accessToken)
+      }
       await loadConversations(accessToken)
     } catch (error) {
       if (isAuthenticationError(error)) {
@@ -617,6 +620,13 @@ function isAuthenticationError(error: unknown): boolean {
 
 function isNetworkError(error: unknown): boolean {
   return error instanceof TypeError
+}
+
+function isMemoryChangingAction(action: { tool_name: string; status: string }): boolean {
+  return (
+    action.status === 'success' &&
+    (action.tool_name === 'save_memory' || action.tool_name === 'delete_memory')
+  )
 }
 
 export default App

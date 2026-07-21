@@ -32,7 +32,10 @@ from app.services.chunking_service import chunk_text
 from app.services.retrieval_service import RetrievedChunk, VectorSearchUnavailableError
 from app.services.text_extraction_service import extract_text
 from app.agents.planner_agent import PlannerAgent
-from app.agents.types import Intent, Plan
+from app.agents.types import ActionRequest, Intent, Plan
+from app.agents.action_agent import ActionAgent
+from app.tools import ToolContext, ToolRegistry, build_default_tool_registry
+from app.tools.internal_tools import INTERNAL_TOOLS
 
 
 def make_docx_bytes(text: str) -> bytes:
@@ -316,6 +319,244 @@ def test_planner_routing():
     )
 
 
+def test_action_agent_selects_initial_tools():
+    agent = ActionAgent()
+
+    assert agent.select_actions(
+        "Remember that my favorite programming language is Python."
+    )[0].tool_name == "save_memory"
+    assert agent.select_actions("What documents do I have?")[0].tool_name == (
+        "list_documents"
+    )
+    assert agent.select_actions(
+        "Search my documents for Nastaran's application."
+    )[0].tool_name == "search_knowledge"
+    assert agent.select_actions("What conversations do I have?")[0].tool_name == (
+        "list_conversations"
+    )
+    assert agent.select_actions("Hello there.") == []
+
+
+def test_tool_argument_validation(client):
+    token = register_and_login(client)
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.email == "user@example.com").one()
+        registry = build_default_tool_registry()
+        result, execution = registry.execute(
+            ToolContext(db, user.id, FakeEmbeddingProvider()),
+            "save_memory",
+            {
+                "category": "preference",
+                "key": "",
+                "value": "Python",
+            },
+        )
+    finally:
+        db.close()
+
+    assert result.status == "error"
+    assert result.error["code"] == "invalid_arguments"
+    assert execution.summary == "Tool arguments were invalid."
+
+
+def test_tool_allowlist_blocks_unknown_tool(client):
+    token = register_and_login(client)
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.email == "user@example.com").one()
+        registry = ToolRegistry(INTERNAL_TOOLS, allowed_tools={"list_memories"})
+        result, execution = registry.execute(
+            ToolContext(db, user.id, FakeEmbeddingProvider()),
+            "save_memory",
+            {
+                "category": "preference",
+                "key": "language",
+                "value": "Python",
+            },
+        )
+    finally:
+        db.close()
+
+    assert result.status == "error"
+    assert result.error["code"] == "tool_not_allowed"
+    assert execution.name == "save_memory"
+
+
+def test_tool_registry_execution_limit_is_strict():
+    registry = build_default_tool_registry()
+
+    assert registry.max_executions == 1
+
+
+def test_orchestrator_enforces_tool_execution_limit(client):
+    token = register_and_login(client)
+
+    class TwoActionAgent(ActionAgent):
+        def select_actions(self, message: str) -> list[ActionRequest]:
+            return [
+                ActionRequest(tool_name="list_memories", arguments={}),
+                ActionRequest(tool_name="list_documents", arguments={}),
+            ]
+
+    app.dependency_overrides[get_chat_orchestrator] = (
+        lambda: ChatOrchestrator(action_agent=TwoActionAgent())
+    )
+
+    response = client.post(
+        "/chat",
+        headers=auth_headers(token),
+        json={
+            "conversation_id": "execution-limit",
+            "message": "Run two tools.",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["metadata"]["actions"] == [
+        {
+            "tool_name": "list_memories",
+            "status": "success",
+            "summary": "Listed memories",
+        },
+        {
+            "tool_name": "execution_limit",
+            "status": "error",
+            "summary": "Tool execution limit reached.",
+        },
+    ]
+
+
+def test_tool_structured_error_for_missing_memory(client):
+    token = register_and_login(client)
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.email == "user@example.com").one()
+        registry = build_default_tool_registry()
+        result, execution = registry.execute(
+            ToolContext(db, user.id, FakeEmbeddingProvider()),
+            "delete_memory",
+            {
+                "key": "missing_memory",
+            },
+        )
+    finally:
+        db.close()
+
+    assert result.status == "error"
+    assert result.error == {
+        "code": "memory_not_found",
+        "message": "Memory not found.",
+    }
+    assert execution.summary == "Memory not found."
+
+
+def test_internal_memory_tools_are_user_scoped(client):
+    first_token = register_and_login(
+        client,
+        email="first@example.com",
+        name="First User",
+    )
+    second_token = register_and_login(
+        client,
+        email="second@example.com",
+        name="Second User",
+    )
+    client.post(
+        "/memories",
+        headers=auth_headers(first_token),
+        json={
+            "category": "preference",
+            "key": "editor",
+            "value": "VS Code",
+        },
+    )
+
+    db = SessionLocal()
+    try:
+        first_user = db.query(User).filter(User.email == "first@example.com").one()
+        second_user = db.query(User).filter(User.email == "second@example.com").one()
+        registry = build_default_tool_registry()
+        first_result, _ = registry.execute(
+            ToolContext(db, first_user.id, FakeEmbeddingProvider()),
+            "list_memories",
+            {},
+        )
+        second_result, _ = registry.execute(
+            ToolContext(db, second_user.id, FakeEmbeddingProvider()),
+            "list_memories",
+            {},
+        )
+    finally:
+        db.close()
+
+    assert first_result.data["count"] == 1
+    assert second_result.data["count"] == 0
+    assert second_token
+
+
+def test_internal_save_and_delete_memory_tools(client):
+    token = register_and_login(client)
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.email == "user@example.com").one()
+        registry = build_default_tool_registry()
+        save_result, _ = registry.execute(
+            ToolContext(db, user.id, FakeEmbeddingProvider()),
+            "save_memory",
+            {
+                "category": "preference",
+                "key": "favorite_language",
+                "value": "Python",
+            },
+        )
+        delete_result, _ = registry.execute(
+            ToolContext(db, user.id, FakeEmbeddingProvider()),
+            "delete_memory",
+            {
+                "key": "favorite_language",
+            },
+        )
+        list_result, _ = registry.execute(
+            ToolContext(db, user.id, FakeEmbeddingProvider()),
+            "list_memories",
+            {},
+        )
+    finally:
+        db.close()
+
+    assert save_result.status == "success"
+    assert delete_result.status == "success"
+    assert list_result.data["memories"] == []
+
+
+def test_delete_memory_requires_explicit_intent_in_chat(client):
+    token = register_and_login(client)
+    client.post(
+        "/memories",
+        headers=auth_headers(token),
+        json={
+            "category": "preference",
+            "key": "editor",
+            "value": "VS Code",
+        },
+    )
+
+    response = client.post(
+        "/chat",
+        headers=auth_headers(token),
+        json={
+            "conversation_id": "no-delete",
+            "message": "What do you remember about my editor?",
+        },
+    )
+    memories_response = client.get("/memories", headers=auth_headers(token))
+
+    assert response.status_code == 200
+    assert memories_response.json()[0]["key"] == "editor"
+    assert response.json()["metadata"]["actions"] == []
+
+
 def test_model_router_uses_openai_default():
     openai = FakeProvider("openai", "gpt-test")
     router = fake_model_router(providers=[openai])
@@ -442,6 +683,133 @@ def test_chat_flow_persists_messages_without_auto_memory(monkeypatch, client):
     memories = memories_response.json()
 
     assert memories == []
+
+
+def test_chat_save_memory_tool_persists_memory(client):
+    token = register_and_login(client)
+
+    response = client.post(
+        "/chat",
+        headers=auth_headers(token),
+        json={
+            "conversation_id": "save-memory-tool",
+            "message": "Remember that my favorite programming language is Python.",
+        },
+    )
+    memories_response = client.get("/memories", headers=auth_headers(token))
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["response"] == (
+        "Saved to memory: favorite_programming_language is python."
+    )
+    assert body["metadata"]["actions"] == [
+        {
+            "tool_name": "save_memory",
+            "status": "success",
+            "summary": "Saved to memory",
+        }
+    ]
+    assert memories_response.json()[0]["key"] == "favorite_programming_language"
+    assert memories_response.json()[0]["value"] == "python"
+
+
+def test_chat_list_documents_tool(client):
+    token = register_and_login(client)
+    client.post(
+        "/documents/upload",
+        headers=auth_headers(token),
+        files={
+            "file": (
+                "architecture.txt",
+                b"Architecture content.",
+                "text/plain",
+            )
+        },
+    )
+
+    response = client.post(
+        "/chat",
+        headers=auth_headers(token),
+        json={
+            "conversation_id": "list-documents-tool",
+            "message": "What documents do I have?",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert "architecture.txt" in body["response"]
+    assert body["metadata"]["actions"][0] == {
+        "tool_name": "list_documents",
+        "status": "success",
+        "summary": "Listed documents",
+    }
+
+
+def test_chat_search_knowledge_tool_preserves_rag_metadata(client):
+    token = register_and_login(client)
+    client.post(
+        "/documents/upload",
+        headers=auth_headers(token),
+        files={
+            "file": (
+                "nastaran.txt",
+                b"Nastaran application notes.",
+                "text/plain",
+            )
+        },
+    )
+
+    response = client.post(
+        "/chat",
+        headers=auth_headers(token),
+        json={
+            "conversation_id": "search-knowledge-tool",
+            "message": "Search my documents for Nastaran's application.",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["metadata"]["actions"][0] == {
+        "tool_name": "search_knowledge",
+        "status": "success",
+        "summary": "Searched knowledge",
+    }
+    assert body["metadata"]["knowledge"]["enabled"] is True
+    assert body["metadata"]["knowledge"]["retrieval_count"] == 1
+
+
+def test_chat_list_conversations_tool_preserves_history(client):
+    token = register_and_login(client)
+    client.post(
+        "/chat",
+        headers=auth_headers(token),
+        json={
+            "conversation_id": "history-before-list",
+            "message": "Hello there.",
+        },
+    )
+
+    response = client.post(
+        "/chat",
+        headers=auth_headers(token),
+        json={
+            "conversation_id": "history-list-tool",
+            "message": "What conversations do I have?",
+        },
+    )
+    conversations_response = client.get("/conversations", headers=auth_headers(token))
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["metadata"]["actions"][0] == {
+        "tool_name": "list_conversations",
+        "status": "success",
+        "summary": "Listed conversations",
+    }
+    assert len(conversations_response.json()) == 2
 
 
 def test_memory_ownership_isolation(client):

@@ -627,15 +627,25 @@ body {
   opacity: 0.78;
 }
 
-.memory-used {
+.memory-used,
+.tool-used {
   display: inline-block;
-  margin-bottom: 4px;
+  margin: 0 6px 4px 0;
   padding: 2px 7px;
   border-radius: 999px;
-  background: #e6f4ea;
-  color: #137333;
   font-size: 0.74rem;
   font-weight: 700;
+}
+
+.memory-used,
+.tool-used--success {
+  background: #e6f4ea;
+  color: #137333;
+}
+
+.tool-used--error {
+  background: #fce8e6;
+  color: #b3261e;
 }
 
 .chat-message__bubble p {

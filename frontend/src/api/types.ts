@@ -61,6 +61,13 @@ export interface MemoryRetrievalMetadata {
 export interface ChatResponseMetadata {
   knowledge: KnowledgeRetrievalMetadata | null
   memory: MemoryRetrievalMetadata | null
+  actions?: ActionExecutionMetadata[]
+}
+
+export interface ActionExecutionMetadata {
+  tool_name: string
+  status: 'success' | 'error'
+  summary: string
 }
 
 export interface MemoryCreateRequest {
