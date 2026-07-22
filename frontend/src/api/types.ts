@@ -6,7 +6,9 @@ export interface HealthResponse {
 export interface Message {
   role: 'user' | 'assistant'
   content: string
+  clientId?: string
   metadata?: ChatResponseMetadata | null
+  isIncomplete?: boolean
   created_at?: string | null
 }
 
@@ -140,6 +142,7 @@ export interface ConversationMessage {
   id: number
   role: 'user' | 'assistant'
   content: string
+  response_metadata?: ChatResponseMetadata | null
   created_at: string | null
 }
 

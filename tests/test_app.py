@@ -1,3 +1,5 @@
+import asyncio
+import json
 import os
 from io import BytesIO
 
@@ -8,7 +10,7 @@ os.environ["OPENAI_API_KEY"] = "test-key"
 from fastapi.testclient import TestClient
 
 import pytest
-from sqlalchemy import inspect, text
+from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.exc import IntegrityError
 from fastapi import FastAPI
 
@@ -27,6 +29,7 @@ from app.models.message import Message
 from app.models.user import User
 from app.providers.model_provider import ModelProvider, ProviderAvailabilityError
 from app.providers.model_router import ModelRouter
+from app.routers.chat import stream_chat as stream_chat_route
 from app.orchestrators.chat_orchestrator import ChatOrchestrator
 from app.services.embedding_service import EmbeddingProvider
 from app.services.embedding_backfill_service import backfill_missing_chunk_embeddings
@@ -265,6 +268,22 @@ def register_and_login(
 
 def auth_headers(token: str):
     return {"Authorization": f"Bearer {token}"}
+
+
+def parse_sse_events(text: str) -> list[tuple[str, dict]]:
+    events = []
+    for frame in text.strip().split("\n\n"):
+        event_name = None
+        data_lines = []
+        for line in frame.splitlines():
+            if line.startswith("event:"):
+                event_name = line.removeprefix("event:").strip()
+            elif line.startswith("data:"):
+                data_lines.append(line.removeprefix("data:").strip())
+
+        if event_name and data_lines:
+            events.append((event_name, json.loads("\n".join(data_lines))))
+    return events
 
 
 def test_registration_and_login(client):
@@ -1152,6 +1171,285 @@ def test_conversation_api_is_user_scoped(client):
     assert second_list.json() == []
     assert second_detail.status_code == 404
     assert second_delete.status_code == 404
+
+
+def test_chat_persists_assistant_response_metadata(client):
+    token = register_and_login(client)
+
+    response = client.post(
+        "/chat",
+        headers=auth_headers(token),
+        json={
+            "conversation_id": "metadata-history",
+            "message": "Hello with metadata.",
+            "knowledge_retrieval": False,
+            "memory_retrieval": False,
+        },
+    )
+    detail_response = client.get(
+        "/conversations/metadata-history",
+        headers=auth_headers(token),
+    )
+
+    assert response.status_code == 200
+    assistant = detail_response.json()["messages"][1]
+    assert assistant["role"] == "assistant"
+    assert assistant["response_metadata"] == response.json()["metadata"]
+    assert assistant["response_metadata"]["knowledge"] == {
+        "enabled": False,
+        "mode": "explicit_disabled",
+        "retrieval_count": 0,
+        "sources": [],
+        "warning": None,
+    }
+
+
+def test_legacy_null_response_metadata_serializes_safely(client):
+    token = register_and_login(client)
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.email == "user@example.com").one()
+        db.add(Conversation(conversation_id="legacy-null", user_id=user.id))
+        db.add(
+            Message(
+                conversation_id="legacy-null",
+                user_id=user.id,
+                role="assistant",
+                content="Legacy assistant response.",
+                response_metadata=None,
+            )
+        )
+        db.commit()
+    finally:
+        db.close()
+
+    detail_response = client.get(
+        "/conversations/legacy-null",
+        headers=auth_headers(token),
+    )
+
+    assert detail_response.status_code == 200
+    assert detail_response.json()["messages"][0]["response_metadata"] is None
+
+
+def test_message_response_metadata_column_uses_sqlite_json(client):
+    inspector = inspect(engine)
+    columns = {column["name"]: column for column in inspector.get_columns("messages")}
+
+    assert "response_metadata" in columns
+    assert "JSON" in str(columns["response_metadata"]["type"]).upper()
+
+
+def test_chat_stream_requires_authentication(client):
+    response = client.post(
+        "/chat/stream",
+        json={
+            "conversation_id": "unauthorized-stream",
+            "message": "Hello",
+        },
+    )
+
+    assert response.status_code == 401
+
+
+def test_chat_stream_success_events_reconstruct_and_persist(client):
+    token = register_and_login(client)
+
+    class StreamingProvider(FakeModelProvider):
+        def stream_generate(self, messages: list[dict]):
+            self.last_messages = messages
+            yield "First "
+            yield "second."
+
+    override_model_provider(StreamingProvider())
+
+    response = client.post(
+        "/chat/stream",
+        headers=auth_headers(token),
+        json={
+            "conversation_id": "stream-success",
+            "message": "Stream this.",
+            "knowledge_retrieval": False,
+            "memory_retrieval": False,
+        },
+    )
+    events = parse_sse_events(response.text)
+    deltas = [data["text"] for event, data in events if event == "delta"]
+    complete = [data for event, data in events if event == "complete"][0]
+    detail_response = client.get(
+        "/conversations/stream-success",
+        headers=auth_headers(token),
+    )
+
+    assert response.status_code == 200
+    assert [event for event, _ in events] == ["start", "delta", "delta", "complete"]
+    assert "".join(deltas) == complete["response"] == "First second."
+    assert complete["conversation_id"] == "stream-success"
+    assert complete["metadata"]["memory"] == {
+        "enabled": False,
+        "mode": "explicit_disabled",
+        "retrieval_count": 0,
+        "sources": [],
+    }
+    assistant = detail_response.json()["messages"][1]
+    assert assistant["content"] == "First second."
+    assert assistant["response_metadata"] == complete["metadata"]
+
+
+def test_failed_chat_stream_does_not_persist_assistant_message(client):
+    token = register_and_login(client)
+
+    class FailingStreamingProvider(FakeModelProvider):
+        def stream_generate(self, messages: list[dict]):
+            yield "partial"
+            raise ProviderAvailabilityError("generation failed")
+
+    override_model_provider(FailingStreamingProvider())
+
+    with pytest.raises(ProviderAvailabilityError, match="generation failed"):
+        client.post(
+            "/chat/stream",
+            headers=auth_headers(token),
+            json={
+                "conversation_id": "stream-failure",
+                "message": "Fail after partial.",
+            },
+        )
+
+    detail_response = client.get(
+        "/conversations/stream-failure",
+        headers=auth_headers(token),
+    )
+
+    assert [(message["role"], message["content"]) for message in detail_response.json()["messages"]] == [
+        ("user", "Fail after partial."),
+    ]
+
+
+def test_streaming_provider_fallback_uses_fallback_provider(client):
+    token = register_and_login(client)
+    anthropic = FakeProvider(
+        "anthropic",
+        "claude-test",
+        should_fail=True,
+    )
+    openai = FakeProvider(
+        "openai",
+        "gpt-test",
+        response="fallback streamed response",
+    )
+    app.dependency_overrides[get_model_router] = (
+        lambda: fake_model_router(providers=[anthropic, openai])
+    )
+
+    response = client.post(
+        "/chat/stream",
+        headers=auth_headers(token),
+        json={
+            "conversation_id": "stream-fallback",
+            "message": "Search my documents for architecture",
+            "knowledge_retrieval": False,
+        },
+    )
+    events = parse_sse_events(response.text)
+    complete = [data for event, data in events if event == "complete"][0]
+
+    assert response.status_code == 200
+    assert complete["response"] == "fallback streamed response"
+
+
+def test_chat_stream_disconnect_before_provider_does_not_persist_assistant(client):
+    token = register_and_login(client)
+
+    class TrackingProvider(FakeModelProvider):
+        was_called = False
+
+        def stream_generate(self, messages: list[dict]):
+            self.was_called = True
+            yield "should not stream"
+
+    provider = TrackingProvider()
+    override_model_provider(provider)
+    app.dependency_overrides[get_model_router] = lambda: None
+
+    db = SessionLocal()
+    user = db.query(User).filter(User.email == "user@example.com").one()
+
+    class DisconnectingRequest:
+        headers = {"x-request-id": "disconnect-before-provider"}
+
+        def __init__(self):
+            self.results = iter([False, False, False, True])
+
+        async def is_disconnected(self):
+            return next(self.results, True)
+
+    response = stream_chat_route(
+        http_request=DisconnectingRequest(),
+        request=type(
+            "Request",
+            (),
+            {
+                "conversation_id": "disconnect-before-provider",
+                "message": "Disconnect before provider.",
+                "knowledge_retrieval": False,
+                "memory_retrieval": False,
+            },
+        )(),
+        db=db,
+        current_user=user,
+        model_provider=provider,
+        model_router=None,
+        embedding_provider=FakeEmbeddingProvider(),
+        orchestrator=ChatOrchestrator(),
+    )
+
+    async def consume_stream():
+        chunks = []
+        with pytest.raises(asyncio.CancelledError):
+            async for chunk in response.body_iterator:
+                chunks.append(chunk)
+        return chunks
+
+    try:
+        chunks = asyncio.run(consume_stream())
+        messages = db.query(Message).filter(
+            Message.conversation_id == "disconnect-before-provider"
+        ).order_by(Message.id).all()
+    finally:
+        db.close()
+
+    assert provider.was_called is False
+    assert [message.role for message in messages] == ["user"]
+    assert "event: start" in "".join(chunks)
+
+
+def test_user_cannot_retrieve_other_users_response_metadata(client):
+    first_token = register_and_login(
+        client,
+        email="first-metadata@example.com",
+        name="First Metadata",
+    )
+    second_token = register_and_login(
+        client,
+        email="second-metadata@example.com",
+        name="Second Metadata",
+    )
+    client.post(
+        "/chat",
+        headers=auth_headers(first_token),
+        json={
+            "conversation_id": "private-metadata",
+            "message": "Private metadata.",
+        },
+    )
+
+    second_detail = client.get(
+        "/conversations/private-metadata",
+        headers=auth_headers(second_token),
+    )
+
+    assert second_detail.status_code == 404
 
 
 def test_delete_conversation_removes_owned_messages(client):
@@ -2364,6 +2662,63 @@ def test_desktop_startup_configuration_is_loopback_and_sqlite(tmp_path, monkeypa
     assert "JWT_SECRET_KEY" in secret_service.values
 
 
+def test_desktop_schema_reconciliation_adds_response_metadata(tmp_path, monkeypatch):
+    from app.database import database as database_module
+
+    sqlite_path = tmp_path / "desktop.sqlite3"
+    desktop_engine = create_engine(
+        f"sqlite:///{sqlite_path.as_posix()}",
+        connect_args={"check_same_thread": False},
+    )
+    with desktop_engine.begin() as connection:
+        connection.execute(
+            text(
+                """
+                CREATE TABLE desktop_schema_version (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    version INTEGER NOT NULL,
+                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+        )
+        connection.execute(
+            text(
+                """
+                CREATE TABLE messages (
+                    id INTEGER PRIMARY KEY,
+                    conversation_id VARCHAR NOT NULL,
+                    user_id INTEGER,
+                    role VARCHAR NOT NULL,
+                    content TEXT NOT NULL,
+                    created_at DATETIME
+                )
+                """
+            )
+        )
+        connection.execute(
+            text("INSERT INTO desktop_schema_version (id, version) VALUES (1, 1)")
+        )
+
+    monkeypatch.setattr(settings, "DESKTOP_MODE", True)
+    monkeypatch.setattr(settings, "DESKTOP_SCHEMA_VERSION", 2)
+    monkeypatch.setattr(database_module, "engine", desktop_engine)
+
+    try:
+        database_module._reconcile_desktop_schema()
+        inspector = inspect(desktop_engine)
+        columns = {column["name"] for column in inspector.get_columns("messages")}
+        with desktop_engine.connect() as connection:
+            version = connection.execute(
+                text("SELECT version FROM desktop_schema_version WHERE id = 1")
+            ).scalar_one()
+    finally:
+        desktop_engine.dispose()
+
+    assert "response_metadata" in columns
+    assert version == 2
+
+
 def test_select_loopback_port_returns_available_port():
     port = select_loopback_port()
 
@@ -2416,6 +2771,46 @@ def test_desktop_secret_api_does_not_return_full_secret(monkeypatch):
         "configured": True,
         "masked": "sk-...alue",
     }
+
+
+def test_desktop_client_log_requires_desktop_mode(monkeypatch):
+    from app.routers import desktop as desktop_router_module
+
+    monkeypatch.setattr(settings, "DESKTOP_MODE", False)
+
+    test_app = FastAPI()
+    test_app.include_router(desktop_router_module.router, prefix="/api")
+    with TestClient(test_app) as desktop_client:
+        response = desktop_client.post(
+            "/api/desktop/client-log",
+            json={
+                "event": "xhr_start",
+                "conversation_id": "client-log-test",
+                "detail": {"transport": "xhr"},
+            },
+        )
+
+    assert response.status_code == 404
+
+
+def test_desktop_client_log_accepts_desktop_mode(monkeypatch):
+    from app.routers import desktop as desktop_router_module
+
+    monkeypatch.setattr(settings, "DESKTOP_MODE", True)
+
+    test_app = FastAPI()
+    test_app.include_router(desktop_router_module.router, prefix="/api")
+    with TestClient(test_app) as desktop_client:
+        response = desktop_client.post(
+            "/api/desktop/client-log",
+            json={
+                "event": "xhr_start",
+                "conversation_id": "client-log-test",
+                "detail": {"transport": "xhr"},
+            },
+        )
+
+    assert response.status_code == 204
 
 
 def test_sqlite_foreign_keys_are_enabled():

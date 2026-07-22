@@ -57,7 +57,7 @@ class Settings(BaseSettings):
     DB_CONNECT_TIMEOUT_SECONDS: int = 10
     DB_STARTUP_RETRY_ATTEMPTS: int = 5
     DB_STARTUP_RETRY_DELAY_SECONDS: int = 2
-    DESKTOP_SCHEMA_VERSION: int = 1
+    DESKTOP_SCHEMA_VERSION: int = 2
 
     model_config = SettingsConfigDict(
         env_file=".env",

@@ -1,0 +1,7 @@
+{
+  "database_backend": "sqlite",
+  "window_height": 700,
+  "window_min_height": 640,
+  "window_min_width": 960,
+  "window_width": 1100
+}

@@ -2,6 +2,8 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict
 
+from app.schemas.chat import ChatResponseMetadata
+
 
 class ConversationMessageResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -9,6 +11,7 @@ class ConversationMessageResponse(BaseModel):
     id: int
     role: str
     content: str
+    response_metadata: ChatResponseMetadata | None = None
     created_at: datetime | None = None
 
 

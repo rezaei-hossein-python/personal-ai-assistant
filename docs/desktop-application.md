@@ -162,6 +162,16 @@ npm.cmd run test:a11y
 
 The desktop launcher requires `frontend/dist` in source mode. The PyInstaller build bundles it as `frontend_dist`.
 
+## Chat Streaming And Markdown
+
+The desktop window serves the same compiled React frontend and loopback FastAPI backend as browser mode. Phase 14 streaming uses authenticated `fetch` against `POST /chat/stream`, so it works through the local backend without EventSource token workarounds. Stop generating uses `AbortController`, preserves partial text, and does not save an incomplete assistant message.
+
+Assistant Markdown rendering and persisted `response_metadata` history use the same frontend components in desktop and browser mode. Repeat streaming, cancellation, Markdown, citation, and memory-indicator checks with:
+
+```cmd
+.\.conda\python.exe -m desktop.main
+```
+
 ## Accessibility Notes
 
 Desktop UI accessibility follows the same React implementation as browser mode. Phase 13 adds semantic landmarks, a Skip to conversation link, strong visible focus indicators, explicit labels and error associations, polite status announcements, keyboard focus restoration, clearer destructive-action confirmations, AA-oriented contrast fixes, responsive reflow improvements, and reduced-motion CSS.

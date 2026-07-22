@@ -542,9 +542,15 @@ Current Knowledge/RAG v1 limitations:
 - Semantic retrieval requires PostgreSQL with pgvector in runtime environments.
 - The frontend shows source document names and chunk locations, but it does not open an in-document preview.
 - Uploaded document files are not stored as original binary blobs; extracted text chunks and metadata are stored.
-- Chat responses are non-streaming.
-- Markdown in assistant responses is displayed as plain text.
 - Retrieval uses top-k similarity only; there is no reranker or manual source selection.
+
+## Chat Experience v2
+
+Phase 14 keeps `POST /chat` stable and adds `POST /chat/stream` for authenticated `text/event-stream` responses. Stream events use a small application protocol: `start`, `delta`, `complete`, and `error`.
+
+Assistant messages now persist nullable `response_metadata` JSON, so conversation history can restore citations, retrieval warnings, memory indicators, and action summaries. Assistant text renders as secure GitHub-flavored Markdown in the React UI; user text remains plain text and raw HTML execution is not enabled.
+
+See [docs/chat-experience-v2.md](docs/chat-experience-v2.md) for the event protocol, persistence lifecycle, cancellation semantics, migration notes, and manual validation checklist.
 
 ## Testing
 

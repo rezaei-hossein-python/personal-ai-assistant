@@ -55,7 +55,7 @@ The API client lives in `src/api`.
 - `http.ts` defines `fetchJson`, the shared JSON request helper.
 - `ApiError` wraps non-2xx responses with HTTP status and parsed response details.
 - `auth.ts` calls `POST /auth/login`.
-- `chat.ts` calls `POST /chat`.
+- `chat.ts` keeps the compatibility `POST /chat` client and adds authenticated `POST /chat/stream` SSE handling.
 - `documents.ts` calls `/documents` upload, list, fetch, and search endpoints.
 - `health.ts` calls `GET /health`.
 - `memories.ts` calls `/memories` create, list, and delete endpoints.
@@ -149,11 +149,15 @@ This health check is informational. It does not block rendering the login form.
 After successful login, the frontend creates a new `conversation_id` in memory. Each submitted message:
 
 1. Adds the user message to local UI state.
-2. Sends `POST /chat` with the active `conversation_id` and message text.
-3. Adds the assistant response from the backend to local UI state.
-4. Renders memory usage, retrieval warnings, source citations, or no-source state when returned in response metadata.
+2. Adds one pending assistant message to local UI state.
+3. Sends `POST /chat/stream` with the active `conversation_id`, message text, bearer token, and an `AbortController`.
+4. Appends `delta` text to the same assistant message.
+5. Replaces the temporary assistant state with the authoritative `complete` response and metadata.
+6. Renders memory usage, retrieval warnings, source citations, or no-source state when returned in response metadata.
 
-The chat UI prevents duplicate in-flight sends. Failed non-authentication requests keep the current visible conversation in place and show an error.
+The chat UI prevents duplicate in-flight sends and exposes a keyboard-accessible Stop generating control. Failed or cancelled streams keep received partial text visible, mark it incomplete, and do not retry through `POST /chat`.
+
+Assistant messages render Markdown through `react-markdown` and `remark-gfm`. Raw HTML rendering is not enabled, links use `rel="noreferrer noopener"`, and long code blocks or tables scroll inside the message bubble. User messages remain plain text.
 
 ## Memory UI
 
@@ -202,8 +206,6 @@ The ID is cleared on logout and on authentication expiry. Frontend v1 does not l
 - One active in-memory conversation per login session.
 - No conversation history list or resume UI.
 - No document preview or source deep-linking.
-- No streaming responses.
-- No markdown rendering for assistant text.
 - Backend health status is checked only on initial app mount.
 
 ## Validation
@@ -214,6 +216,7 @@ Run from `frontend/`:
 npm.cmd ci
 npm.cmd run lint
 npm.cmd run build
+npm.cmd run test:a11y
 ```
 
 Production builds can set:

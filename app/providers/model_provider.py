@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 
 
@@ -43,6 +44,9 @@ class ModelProvider(ABC):
     @abstractmethod
     def generate(self, messages: list[dict]) -> str:
         raise NotImplementedError
+
+    def stream_generate(self, messages: list[dict]) -> Iterator[str]:
+        yield self.generate(messages)
 
     @abstractmethod
     def generate_structured(

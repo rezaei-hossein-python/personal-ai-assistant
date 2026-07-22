@@ -1,3 +1,4 @@
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 
 from app.agents.types import Intent, Plan
@@ -94,6 +95,34 @@ class ModelRouter:
             response = route.provider.generate(messages)
             route.providers_invoked.append(route.provider.provider_name)
             return response
+
+    def stream_generate_with_fallback(
+        self,
+        route: ModelRouteResult,
+        messages: list[dict],
+    ) -> Iterator[str]:
+        emitted_delta = False
+        try:
+            route.providers_invoked.append(route.provider.provider_name)
+            for delta in route.provider.stream_generate(messages):
+                emitted_delta = True
+                yield delta
+        except ProviderAvailabilityError as exc:
+            if emitted_delta:
+                raise
+            fallback = self._fallback_provider(
+                exclude={route.provider.provider_name}
+            )
+            route.fallback_events.append(
+                ProviderFallbackEvent(
+                    from_provider=route.provider.provider_name,
+                    to_provider=fallback.provider_name,
+                    reason=str(exc),
+                )
+            )
+            route.provider = fallback
+            route.providers_invoked.append(route.provider.provider_name)
+            yield from route.provider.stream_generate(messages)
 
     def collaborate(
         self,

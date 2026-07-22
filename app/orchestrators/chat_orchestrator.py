@@ -1,5 +1,6 @@
 import json
 from dataclasses import dataclass
+from typing import Iterator
 
 from sqlalchemy.orm import Session
 
@@ -25,6 +26,12 @@ from app.tools import ToolContext
 class ChatResult:
     response: str
     metadata: dict
+
+
+@dataclass
+class ChatStreamEvent:
+    event: str
+    data: dict
 
 
 class ChatOrchestrator:
@@ -189,33 +196,29 @@ class ChatOrchestrator:
         )
         agents_invoked.append(self.evaluator_agent.name)
 
+        metadata = self._build_response_metadata(
+            knowledge_context=knowledge_context,
+            knowledge_mode=knowledge_mode,
+            memory_context=memory_context,
+            memory_mode=memory_mode,
+            tool_executions=tool_executions,
+        )
         save_message(
             db,
             conversation_id,
             "assistant",
             response,
             user_id,
+            response_metadata=metadata,
         )
 
-        self.last_execution_metadata = AgentExecutionMetadata(
-            selected_intent=plan.intent.value,
+        self._record_execution_metadata(
+            plan=plan,
             agents_invoked=agents_invoked,
-            retrieval_count=len(knowledge_context.chunks),
-            provider=selected_provider.provider_name,
-            model=selected_provider.generation_model,
+            knowledge_context=knowledge_context,
+            selected_provider=selected_provider,
+            route=route,
             evaluation_warnings=evaluation.warnings,
-            selected_provider=selected_provider.provider_name,
-            selected_model=selected_provider.generation_model,
-            preferred_provider=(
-                route.preferred_provider if route else selected_provider.provider_name
-            ),
-            fallback_events=[
-                fallback.__dict__ for fallback in route.fallback_events
-            ] if route else [],
-            providers_invoked=(
-                route.providers_invoked if route else [selected_provider.provider_name]
-            ),
-            collaboration_mode_used=route.collaboration_mode if route else False,
         )
         logger.info(
             "Chat orchestration completed",
@@ -226,45 +229,215 @@ class ChatOrchestrator:
 
         return ChatResult(
             response=response,
-            metadata={
-                "knowledge": {
-                    "enabled": knowledge_context.metadata.get("enabled", False),
-                    "mode": knowledge_mode,
-                    "retrieval_count": len(knowledge_context.chunks),
-                    "sources": [
-                        {
-                            "document_id": chunk.document_id,
-                            "document_name": chunk.document_name,
-                            "chunk_id": chunk.chunk_id,
-                            "chunk_index": chunk.chunk_index,
-                            "start_character": chunk.start_character,
-                            "end_character": chunk.end_character,
-                            "distance": chunk.distance,
-                        }
-                        for chunk in knowledge_context.chunks
-                    ],
-                    "warning": knowledge_context.metadata.get("warning"),
-                },
-                "memory": {
-                    "enabled": memory_context.metadata.get("enabled", False),
-                    "mode": memory_mode,
-                    "retrieval_count": len(memory_context.memories),
-                    "sources": [
-                        {
-                            "category": memory.category,
-                            "key": memory.key,
-                        }
-                        for memory in memory_context.memories
-                    ],
-                },
-                "actions": [
+            metadata=metadata,
+        )
+
+    def stream_chat(
+        self,
+        db: Session,
+        user_id: int,
+        conversation_id: str,
+        message: str,
+        model_provider: ModelProvider,
+        embedding_provider: EmbeddingProvider,
+        model_router: ModelRouter | None = None,
+        knowledge_retrieval: bool | None = None,
+        memory_retrieval: bool | None = None,
+    ) -> Iterator[ChatStreamEvent]:
+        yield ChatStreamEvent("start", {"conversation_id": conversation_id})
+
+        plan = self.planner_agent.plan(message)
+        agents_invoked = [self.planner_agent.name]
+        route = None
+        memory_mode = "planner"
+        memory_enabled = plan.use_memory
+        knowledge_mode = "planner"
+        knowledge_enabled = plan.use_knowledge
+
+        if memory_retrieval is True:
+            memory_mode = "explicit_enabled"
+            memory_enabled = True
+            plan.use_memory = True
+        elif memory_retrieval is False:
+            memory_mode = "explicit_disabled"
+            memory_enabled = False
+            plan.use_memory = False
+
+        if knowledge_retrieval is True:
+            knowledge_mode = "explicit_enabled"
+            knowledge_enabled = True
+            plan.use_knowledge = True
+        elif knowledge_retrieval is False:
+            knowledge_mode = "explicit_disabled"
+            knowledge_enabled = False
+            plan.use_knowledge = False
+
+        action_result = self.action_agent.prepare_actions(plan, message)
+        if knowledge_retrieval is False:
+            action_result.actions = [
+                action
+                for action in action_result.actions
+                if action.tool_name != "search_knowledge"
+            ]
+        agents_invoked.append(self.action_agent.name)
+        tool_results, tool_executions = self._execute_actions(
+            db=db,
+            user_id=user_id,
+            action_result=action_result,
+            embedding_provider=embedding_provider,
+        )
+
+        if self._has_action(action_result, "list_documents"):
+            knowledge_enabled = False
+            plan.use_knowledge = False
+        if self._has_action(action_result, "list_conversations"):
+            memory_enabled = False
+            knowledge_enabled = False
+            plan.use_memory = False
+            plan.use_knowledge = False
+
+        get_or_create_conversation(db, conversation_id, user_id)
+        user_message = save_message(db, conversation_id, "user", message, user_id)
+        logger.info(
+            "user persisted conversation_id=%s message_id=%s",
+            conversation_id,
+            user_message.id,
+        )
+        history = get_messages(db, conversation_id, user_id)
+        logger.info(
+            "history loaded conversation_id=%s message_count=%s",
+            conversation_id,
+            len(history),
+        )
+
+        memory_context = self.memory_agent.get_context(
+            db=db,
+            user_id=user_id,
+            query=message,
+            enabled=memory_enabled,
+        )
+        memory_context.metadata["mode"] = memory_mode
+        agents_invoked.append(self.memory_agent.name)
+
+        knowledge_context = self.knowledge_agent.get_context(
+            db=db,
+            user_id=user_id,
+            query=message,
+            enabled=knowledge_enabled,
+            embedding_provider=embedding_provider,
+        )
+        knowledge_context.metadata["mode"] = knowledge_mode
+        agents_invoked.append(self.knowledge_agent.name)
+
+        messages = build_chat_messages(
+            message=message,
+            history=history,
+            memories=memory_context.memories,
+            document_chunks=knowledge_context.chunks,
+        )
+        if tool_results:
+            messages.append(
+                {
+                    "role": "system",
+                    "content": self._format_tool_results_for_prompt(tool_results),
+                }
+            )
+
+        response_parts: list[str] = []
+        deterministic_response = self._deterministic_tool_response(tool_results)
+        if deterministic_response is not None:
+            selected_provider = model_provider
+            response_parts.append(deterministic_response)
+            yield ChatStreamEvent("delta", {"text": deterministic_response})
+        elif model_router:
+            route = model_router.route(plan, message)
+            collaboration_analyses = model_router.collaborate(route, messages)
+            if collaboration_analyses:
+                messages = messages + [
                     {
-                        "tool_name": execution.name,
-                        "status": execution.status,
-                        "summary": execution.summary,
+                        "role": "system",
+                        "content": (
+                            "Additional model analyses for synthesis:\n"
+                            + "\n\n".join(collaboration_analyses)
+                        ),
                     }
-                    for execution in tool_executions
-                ],
+                ]
+            yield ChatStreamEvent(
+                "__checkpoint",
+                {"stage": "before_provider_generation"},
+            )
+            logger.info("provider streaming conversation_id=%s", conversation_id)
+            for delta in model_router.stream_generate_with_fallback(route, messages):
+                logger.info(
+                    "provider callback conversation_id=%s delta_length=%s",
+                    conversation_id,
+                    len(delta),
+                )
+                response_parts.append(delta)
+                yield ChatStreamEvent("delta", {"text": delta})
+            selected_provider = route.provider
+        else:
+            selected_provider = model_provider
+            yield ChatStreamEvent(
+                "__checkpoint",
+                {"stage": "before_provider_generation"},
+            )
+            logger.info("provider streaming conversation_id=%s", conversation_id)
+            for delta in model_provider.stream_generate(messages):
+                logger.info(
+                    "provider callback conversation_id=%s delta_length=%s",
+                    conversation_id,
+                    len(delta),
+                )
+                response_parts.append(delta)
+                yield ChatStreamEvent("delta", {"text": delta})
+
+        response = "".join(response_parts)
+        evaluation = self.evaluator_agent.evaluate_context(
+            plan=plan,
+            memory_context=memory_context,
+            knowledge_context=knowledge_context,
+            response=response,
+        )
+        agents_invoked.append(self.evaluator_agent.name)
+
+        metadata = self._build_response_metadata(
+            knowledge_context=knowledge_context,
+            knowledge_mode=knowledge_mode,
+            memory_context=memory_context,
+            memory_mode=memory_mode,
+            tool_executions=tool_executions,
+        )
+        yield ChatStreamEvent("__checkpoint", {"stage": "before_persistence"})
+        logger.info("persistence begins conversation_id=%s", conversation_id)
+        assistant_message = save_message(
+            db,
+            conversation_id,
+            "assistant",
+            response,
+            user_id,
+            response_metadata=metadata,
+        )
+        logger.info(
+            "persistence completes conversation_id=%s message_id=%s",
+            conversation_id,
+            assistant_message.id,
+        )
+        self._record_execution_metadata(
+            plan=plan,
+            agents_invoked=agents_invoked,
+            knowledge_context=knowledge_context,
+            selected_provider=selected_provider,
+            route=route,
+            evaluation_warnings=evaluation.warnings,
+        )
+
+        yield ChatStreamEvent(
+            "complete",
+            {
+                "response": response,
+                "conversation_id": conversation_id,
+                "metadata": metadata,
             },
         )
 
@@ -325,6 +498,85 @@ class ChatOrchestrator:
             )
 
         return tool_results, tool_executions
+
+    def _build_response_metadata(
+        self,
+        knowledge_context,
+        knowledge_mode: str,
+        memory_context,
+        memory_mode: str,
+        tool_executions: list,
+    ) -> dict:
+        return {
+            "knowledge": {
+                "enabled": knowledge_context.metadata.get("enabled", False),
+                "mode": knowledge_mode,
+                "retrieval_count": len(knowledge_context.chunks),
+                "sources": [
+                    {
+                        "document_id": chunk.document_id,
+                        "document_name": chunk.document_name,
+                        "chunk_id": chunk.chunk_id,
+                        "chunk_index": chunk.chunk_index,
+                        "start_character": chunk.start_character,
+                        "end_character": chunk.end_character,
+                        "distance": chunk.distance,
+                    }
+                    for chunk in knowledge_context.chunks
+                ],
+                "warning": knowledge_context.metadata.get("warning"),
+            },
+            "memory": {
+                "enabled": memory_context.metadata.get("enabled", False),
+                "mode": memory_mode,
+                "retrieval_count": len(memory_context.memories),
+                "sources": [
+                    {
+                        "category": memory.category,
+                        "key": memory.key,
+                    }
+                    for memory in memory_context.memories
+                ],
+            },
+            "actions": [
+                {
+                    "tool_name": execution.name,
+                    "status": execution.status,
+                    "summary": execution.summary,
+                }
+                for execution in tool_executions
+            ],
+        }
+
+    def _record_execution_metadata(
+        self,
+        plan,
+        agents_invoked: list[str],
+        knowledge_context,
+        selected_provider: ModelProvider,
+        route,
+        evaluation_warnings: list[str],
+    ) -> None:
+        self.last_execution_metadata = AgentExecutionMetadata(
+            selected_intent=plan.intent.value,
+            agents_invoked=agents_invoked,
+            retrieval_count=len(knowledge_context.chunks),
+            provider=selected_provider.provider_name,
+            model=selected_provider.generation_model,
+            evaluation_warnings=evaluation_warnings,
+            selected_provider=selected_provider.provider_name,
+            selected_model=selected_provider.generation_model,
+            preferred_provider=(
+                route.preferred_provider if route else selected_provider.provider_name
+            ),
+            fallback_events=[
+                fallback.__dict__ for fallback in route.fallback_events
+            ] if route else [],
+            providers_invoked=(
+                route.providers_invoked if route else [selected_provider.provider_name]
+            ),
+            collaboration_mode_used=route.collaboration_mode if route else False,
+        )
 
     def _format_tool_results_for_prompt(self, tool_results: list[dict]) -> str:
         safe_results = [

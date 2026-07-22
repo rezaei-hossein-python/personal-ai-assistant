@@ -126,10 +126,41 @@ def initialize_desktop_database() -> None:
             )
 
     Base.metadata.create_all(bind=engine)
+    _reconcile_desktop_schema()
     logger.info(
         "Desktop database initialized schema_version=%s",
         settings.DESKTOP_SCHEMA_VERSION,
     )
+
+
+def _reconcile_desktop_schema() -> None:
+    if not settings.DESKTOP_MODE:
+        return
+    if engine.dialect.name != "sqlite":
+        raise RuntimeError("Desktop schema reconciliation requires SQLite")
+
+    with engine.begin() as connection:
+        message_columns = {
+            row[1]
+            for row in connection.execute(text("PRAGMA table_info(messages)")).all()
+        }
+        if "response_metadata" not in message_columns:
+            connection.execute(
+                text("ALTER TABLE messages ADD COLUMN response_metadata JSON")
+            )
+            logger.info("Desktop schema added messages.response_metadata")
+
+        connection.execute(
+            text(
+                """
+                UPDATE desktop_schema_version
+                SET version = :version,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = 1 AND version < :version
+                """
+            ),
+            {"version": settings.DESKTOP_SCHEMA_VERSION},
+        )
 
 
 def get_db():

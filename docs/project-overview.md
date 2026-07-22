@@ -345,16 +345,15 @@ The backend and frontend development servers run in separate terminals.
 - Access token is memory-only, so browser refresh requires signing in again.
 - Conversation titles use the existing stored title when present; otherwise the frontend derives a label from the first user message or "New conversation".
 - No AI-generated conversation titles in v1.
-- Historical messages do not preserve citation or memory source metadata.
 - No document preview or source deep-linking.
-- No streaming responses.
-- No markdown rendering for assistant text.
 - Backend health check runs only on initial app mount.
 - Formal WCAG conformance certification has not been performed; the UI is designed and tested toward WCAG 2.2 Level AA where applicable.
 - Runtime semantic retrieval requires PostgreSQL with pgvector.
 - Uploaded original document binaries are not retained; extracted chunks and metadata are stored.
 - Retrieval uses top-k vector similarity without reranking or manual source selection.
 - Memory retrieval has no embeddings, reranker, provenance graph, or automatic extraction.
+
+Phase 14 adds authenticated streaming chat, persisted assistant `response_metadata`, and secure assistant Markdown rendering. See `docs/chat-experience-v2.md`.
 
 ## Architecture Direction
 

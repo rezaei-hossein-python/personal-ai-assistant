@@ -2,6 +2,7 @@ from pydantic import BaseModel, Field
 from fastapi import APIRouter, HTTPException, status
 
 from app.config import settings
+from app.core.logging import logger
 from desktop.secrets import DesktopSecretService, SecretStorageError
 
 
@@ -31,6 +32,12 @@ class TestOpenAIKeyResponse(BaseModel):
     configured: bool
     valid: bool
     message: str
+
+
+class ClientLogRequest(BaseModel):
+    event: str = Field(min_length=1, max_length=120)
+    conversation_id: str | None = Field(default=None, max_length=200)
+    detail: dict = Field(default_factory=dict)
 
 
 @router.get("/status", response_model=DesktopStatusResponse)
@@ -100,6 +107,22 @@ def test_openai_key():
         configured=True,
         valid=True,
         message="OpenAI API key is configured",
+    )
+
+
+@router.post("/client-log", status_code=204)
+def client_log(request: ClientLogRequest):
+    _require_desktop_mode()
+    safe_detail = {
+        key: str(value)[:500]
+        for key, value in request.detail.items()
+        if isinstance(key, str)
+    }
+    logger.info(
+        "desktop client stream event=%s conversation_id=%s detail=%s",
+        request.event,
+        request.conversation_id or "-",
+        safe_detail,
     )
 
 

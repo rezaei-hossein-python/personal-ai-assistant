@@ -1,5 +1,6 @@
 from app.config import settings
 from app.core.embedding import DEFAULT_EMBEDDING_MODEL
+from app.core.logging import logger
 from app.providers.model_provider import (
     ModelCapabilities,
     ModelProvider,
@@ -52,6 +53,21 @@ class OpenAIModelProvider(ModelProvider):
             input=messages,
         )
         return response.output_text
+
+    def stream_generate(self, messages: list[dict]):
+        with self._get_client().responses.stream(
+            model=self.generation_model,
+            input=messages,
+        ) as stream:
+            for event in stream:
+                logger.info(
+                    "provider callback provider=%s model=%s event_type=%s",
+                    self.provider_name,
+                    self.generation_model,
+                    getattr(event, "type", "-"),
+                )
+                if event.type == "response.output_text.delta" and event.delta:
+                    yield event.delta
 
     def generate_structured(
         self,

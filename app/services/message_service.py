@@ -7,12 +7,14 @@ def save_message(
     role: str,
     content: str,
     user_id: int | None = None,
+    response_metadata: dict | None = None,
 ):
     message = Message(
         conversation_id=conversation_id,
         user_id=user_id,
         role=role,
         content=content,
+        response_metadata=response_metadata,
     )
 
     db.add(message)

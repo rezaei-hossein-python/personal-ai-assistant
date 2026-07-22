@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import './App.css'
 import { login, register } from './api/auth'
-import { sendChat } from './api/chat'
+import { streamChat } from './api/chat'
 import {
   deleteConversation,
   getConversation,
@@ -16,7 +16,7 @@ import {
 } from './api/desktop'
 import { listDocuments, uploadDocument } from './api/documents'
 import { getHealth } from './api/health'
-import { ApiError } from './api/http'
+import { ApiError, apiBaseUrl } from './api/http'
 import { createMemory, deleteMemory, listMemories } from './api/memories'
 import type {
   ConversationSummary,
@@ -52,6 +52,7 @@ function App() {
   const [documents, setDocuments] = useState<DocumentResponse[]>([])
   const [memories, setMemories] = useState<MemoryResponse[]>([])
   const [desktopStatus, setDesktopStatus] = useState<DesktopStatusResponse | null>(null)
+  const [isDesktopMode, setIsDesktopMode] = useState(false)
   const [openAIKeyStatus, setOpenAIKeyStatus] = useState<SecretStatusResponse | null>(null)
   const [knowledgeMode, setKnowledgeMode] = useState<KnowledgeMode>('auto')
   const [memoryMode, setMemoryMode] = useState<MemoryMode>('auto')
@@ -76,6 +77,7 @@ function App() {
   const [isDeletingMemory, setIsDeletingMemory] = useState(false)
   const [isSavingDesktopSettings, setIsSavingDesktopSettings] = useState(false)
   const isSendingMessageRef = useRef(false)
+  const chatAbortControllerRef = useRef<AbortController | null>(null)
   const chatInputRef = useRef<ChatInputHandle>(null)
   const newChatButtonRef = useRef<HTMLButtonElement | null>(null)
   const conversationButtonRefs = useRef(new Map<string, HTMLButtonElement>())
@@ -117,6 +119,7 @@ function App() {
           return
         }
         setDesktopStatus(status)
+        setIsDesktopMode(status.desktop_mode)
         const secretStatus = await getOpenAIKeyStatus()
         if (isMounted) {
           setOpenAIKeyStatus(secretStatus)
@@ -147,6 +150,8 @@ function App() {
   }, [accessToken])
 
   function clearSession() {
+    chatAbortControllerRef.current?.abort()
+    chatAbortControllerRef.current = null
     clearStoredAccessToken()
     isSendingMessageRef.current = false
     setAccessToken(null)
@@ -290,6 +295,7 @@ function App() {
           .map((message) => ({
             role: message.role,
             content: message.content,
+            metadata: message.response_metadata ?? null,
             created_at: message.created_at,
           })),
       )
@@ -357,6 +363,9 @@ function App() {
   }
 
   function handleNewChat() {
+    if (isSendingMessageRef.current) {
+      handleStopGenerating()
+    }
     setConversationId(null)
     setMessages([])
     setChatError(null)
@@ -544,17 +553,30 @@ function App() {
     }
 
     const activeConversationId = conversationId ?? createConversationId()
+    const pendingAssistantId = createMessageId()
+    const abortController = new AbortController()
+    const completedResponse: {
+      current: { response: string; metadata: Message['metadata'] } | null
+    } = { current: null }
+    let streamErrorMessage: string | null = null
+
     isSendingMessageRef.current = true
+    chatAbortControllerRef.current = abortController
     setConversationId(activeConversationId)
     setMessages((currentMessages) => [
       ...currentMessages,
       { role: 'user', content },
+      {
+        role: 'assistant',
+        content: '',
+        clientId: pendingAssistantId,
+      },
     ])
     setChatError(null)
     setIsSendingMessage(true)
 
     try {
-      const chatResponse = await sendChat(
+      await streamChat(
         {
           conversation_id: activeConversationId,
           message: content,
@@ -562,18 +584,72 @@ function App() {
           memory_retrieval: getMemoryRetrievalValue(memoryMode),
         },
         accessToken,
+        {
+          signal: abortController.signal,
+          onDebug: isDesktopMode
+            ? (event, detail) => {
+                logDesktopStreamEvent(activeConversationId, event, detail)
+              }
+            : undefined,
+          onStart: () => {
+            announce('Assistant response started.')
+          },
+          onDelta: (text) => {
+            setMessages((currentMessages) =>
+              currentMessages.map((message) =>
+                message.clientId === pendingAssistantId
+                  ? { ...message, content: `${message.content}${text}` }
+                  : message,
+              ),
+            )
+          },
+          onComplete: (chatResponse) => {
+            completedResponse.current = {
+              response: chatResponse.response,
+              metadata: chatResponse.metadata,
+            }
+            setConversationId(chatResponse.conversation_id)
+            setMessages((currentMessages) =>
+              currentMessages.map((message) =>
+                message.clientId === pendingAssistantId
+                  ? {
+                      role: 'assistant',
+                      content: chatResponse.response,
+                      metadata: chatResponse.metadata,
+                    }
+                  : message,
+              ),
+            )
+          },
+          onError: (message) => {
+            streamErrorMessage = message
+            setChatError(message)
+          },
+        },
       )
 
-      setMessages((currentMessages) => [
-        ...currentMessages,
-        {
-          role: 'assistant',
-          content: chatResponse.response,
-          metadata: chatResponse.metadata,
-        },
-      ])
+      if (!completedResponse.current) {
+        const persistedResponse = await inspectPersistedAssistantResponse(
+          activeConversationId,
+          accessToken,
+        )
+        if (persistedResponse) {
+          logDesktopStreamEvent(activeConversationId, 'complete_missing_persisted_found', {
+            message_created_at: persistedResponse.created_at ?? null,
+            content_length: persistedResponse.content.length,
+          })
+        } else {
+          logDesktopStreamEvent(activeConversationId, 'complete_missing_not_persisted')
+        }
+
+        setMessages((currentMessages) => markMessageIncomplete(currentMessages, pendingAssistantId))
+        setChatError(streamErrorMessage ?? 'The response ended before completion.')
+        announce('Assistant response interrupted.')
+        return
+      }
+
       announce('Assistant response ready.')
-      if (chatResponse.metadata?.actions?.some(isMemoryChangingAction)) {
+      if (completedResponse.current.metadata?.actions?.some(isMemoryChangingAction)) {
         await loadMemories(accessToken)
         announce('Assistant response ready. Memory updated.')
       }
@@ -584,12 +660,30 @@ function App() {
         return
       }
 
-      setChatError(getChatErrorText(error))
-      announce('Message send failed.')
+      setMessages((currentMessages) => markMessageIncomplete(currentMessages, pendingAssistantId))
+
+      if (isAbortError(error)) {
+        setChatError('Response stopped before completion.')
+        announce('Assistant response stopped.')
+      } else {
+        setChatError(getChatErrorText(error))
+        announce('Message send failed.')
+      }
     } finally {
+      if (chatAbortControllerRef.current === abortController) {
+        chatAbortControllerRef.current = null
+      }
       isSendingMessageRef.current = false
       setIsSendingMessage(false)
+      window.setTimeout(() => chatInputRef.current?.focus(), 0)
     }
+  }
+
+  function handleStopGenerating() {
+    if (conversationId) {
+      logDesktopStreamEvent(conversationId, 'user_stop_requested')
+    }
+    chatAbortControllerRef.current?.abort()
   }
 
   return (
@@ -742,6 +836,18 @@ function App() {
               </p>
             ) : null}
 
+            {isSendingMessage ? (
+              <div className="chat-controls">
+                <button
+                  className="stop-generating-button"
+                  type="button"
+                  onClick={handleStopGenerating}
+                >
+                  Stop generating
+                </button>
+              </div>
+            ) : null}
+
             <ChatInput
               ref={chatInputRef}
               onSubmit={handleSubmitMessage}
@@ -795,6 +901,82 @@ function createConversationId(): string {
   }
 
   return `conversation-${Date.now()}-${Math.random().toString(36).slice(2)}`
+}
+
+function createMessageId(): string {
+  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
+    return crypto.randomUUID()
+  }
+
+  return `message-${Date.now()}-${Math.random().toString(36).slice(2)}`
+}
+
+function markMessageIncomplete(messages: Message[], clientId: string): Message[] {
+  return messages.map((message) =>
+    message.clientId === clientId
+      ? {
+          ...message,
+          isIncomplete: true,
+        }
+      : message,
+  )
+}
+
+async function inspectPersistedAssistantResponse(
+  conversationId: string,
+  accessToken: string,
+): Promise<Message | null> {
+  try {
+    const conversation = await getConversation(conversationId, accessToken)
+    const assistantMessage = [...conversation.messages]
+      .reverse()
+      .find((message) => message.role === 'assistant')
+
+    if (assistantMessage) {
+      return {
+        role: 'assistant',
+        content: assistantMessage.content,
+        metadata: assistantMessage.response_metadata ?? null,
+        created_at: assistantMessage.created_at,
+      }
+    }
+  } catch {
+    return null
+  }
+
+  return null
+}
+
+function logDesktopStreamEvent(
+  conversationId: string,
+  event: string,
+  detail: Record<string, unknown> = {},
+) {
+  const body = JSON.stringify({
+    event,
+    conversation_id: conversationId,
+    detail,
+  })
+
+  try {
+    if (navigator.sendBeacon) {
+      const blob = new Blob([body], { type: 'application/json' })
+      if (navigator.sendBeacon(`${apiBaseUrl}/desktop/client-log`, blob)) {
+        return
+      }
+    }
+  } catch {
+    // Fall through to fetch.
+  }
+
+  void fetch(`${apiBaseUrl}/desktop/client-log`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body,
+    keepalive: true,
+  }).catch(() => undefined)
 }
 
 function getKnowledgeRetrievalValue(mode: KnowledgeMode): boolean | null {
@@ -923,6 +1105,10 @@ function isAuthenticationError(error: unknown): boolean {
 
 function isNetworkError(error: unknown): boolean {
   return error instanceof TypeError
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof DOMException && error.name === 'AbortError'
 }
 
 function isMemoryChangingAction(action: { tool_name: string; status: string }): boolean {

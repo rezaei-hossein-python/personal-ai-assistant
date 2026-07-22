@@ -74,6 +74,7 @@ def get_my_conversation(
                 id=message.id,
                 role=message.role,
                 content=message.content,
+                response_metadata=message.response_metadata,
                 created_at=message.created_at,
             )
             for message in messages

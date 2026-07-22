@@ -1,5 +1,5 @@
 import { AxeBuilder } from '@axe-core/playwright'
-import { chromium } from '@playwright/test'
+import { chromium, expect } from '@playwright/test'
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 
@@ -41,6 +41,21 @@ try {
     assert(await page.getByRole('region', { name: /knowledge documents/i }).isVisible())
     await page.getByRole('button', { name: /^Accessibility planning, 2 messages$/ }).click()
     assert(await page.getByText('Assistant response using project context.').isVisible())
+    assert(await page.getByText('Used memory: 1 saved memory').isVisible())
+    await assertNoAxeViolations(page)
+  })
+
+  await runCheck('streamed markdown response', async (page) => {
+    await page.addInitScript((key) => {
+      window.localStorage.setItem(key, 'test-token')
+    }, tokenStorageKey)
+    await page.goto(baseUrl)
+    await page.getByLabel('Message').fill('Show markdown')
+    await page.getByRole('button', { name: 'Send' }).click()
+    await expect(page.getByRole('heading', { name: 'Markdown heading' })).toBeVisible()
+    await expect(page.getByRole('link', { name: 'Project link' })).toBeVisible()
+    await expect(page.getByText('<script>alert("x")</script>')).toBeVisible()
+    assert.equal(await page.locator('script', { hasText: 'alert("x")' }).count(), 0)
     await assertNoAxeViolations(page)
   })
 
@@ -55,7 +70,7 @@ try {
     assert(await page.locator('#conversation-main').evaluate(isFocused))
   })
 
-  console.log('Accessibility checks passed: 3')
+  console.log('Accessibility checks passed: 4')
 } finally {
   await browser?.close()
   server.kill()
@@ -167,10 +182,56 @@ async function mockApi(page) {
               id: 2,
               role: 'assistant',
               content: 'Assistant response using project context.',
+              response_metadata: {
+                knowledge: {
+                  enabled: true,
+                  mode: 'explicit_enabled',
+                  retrieval_count: 1,
+                  sources: [
+                    {
+                      document_id: 1,
+                      document_name: 'accessibility-notes.md',
+                      chunk_id: 1,
+                      chunk_index: 0,
+                      start_character: 0,
+                      end_character: 80,
+                      distance: 0,
+                    },
+                  ],
+                  warning: null,
+                },
+                memory: {
+                  enabled: true,
+                  mode: 'planner',
+                  retrieval_count: 1,
+                  sources: [{ category: 'preference', key: 'screen_reader' }],
+                },
+                actions: [],
+              },
               created_at: '2026-07-21T00:01:00Z',
             },
           ],
         },
+      })
+      return
+    }
+
+    if (path === '/chat/stream' && method === 'POST') {
+      await route.fulfill({
+        status: 200,
+        contentType: 'text/event-stream',
+        body: [
+          'event: start',
+          'data: {"conversation_id":"streamed-conversation"}',
+          '',
+          'event: delta',
+          'data: {"text":"# Markdown heading\\n\\n- One item\\n\\n[Project link](https://example.com)\\n\\n<script>alert(\\"x\\")</script>"}',
+          '',
+          'event: complete',
+          'data: {"response":"# Markdown heading\\n\\n- One item\\n\\n[Project link](https://example.com)\\n\\n<script>alert(\\"x\\")</script>","conversation_id":"streamed-conversation","metadata":{"knowledge":{"enabled":false,"mode":"explicit_disabled","retrieval_count":0,"sources":[],"warning":null},"memory":{"enabled":false,"mode":"explicit_disabled","retrieval_count":0,"sources":[]},"actions":[]}}',
+          '',
+          '',
+        ].join('\n'),
       })
       return
     }

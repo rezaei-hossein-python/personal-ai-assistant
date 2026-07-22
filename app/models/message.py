@@ -6,6 +6,7 @@ from sqlalchemy import (
     ForeignKey,
     ForeignKeyConstraint,
     Integer,
+    JSON,
     String,
     Text,
 )
@@ -48,6 +49,11 @@ class Message(Base):
     content = Column(
         Text,
         nullable=False
+    )
+
+    response_metadata = Column(
+        JSON,
+        nullable=True
     )
 
     created_at = Column(

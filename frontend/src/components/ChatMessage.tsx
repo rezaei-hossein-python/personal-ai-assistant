@@ -1,3 +1,5 @@
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import type { Message } from '../api/types'
 import { KnowledgeSources } from './KnowledgeSources'
 
@@ -44,7 +46,29 @@ export function ChatMessage({ message }: ChatMessageProps) {
             ))}
           </ul>
         ) : null}
-        <p>{message.content}</p>
+        {message.role === 'assistant' ? (
+          <div className="markdown-content">
+            <ReactMarkdown
+              remarkPlugins={[remarkGfm]}
+              components={{
+                a: ({ href, children, ...props }) => (
+                  <a href={href} rel="noreferrer noopener" target="_blank" {...props}>
+                    {children}
+                  </a>
+                ),
+              }}
+            >
+              {message.content}
+            </ReactMarkdown>
+          </div>
+        ) : (
+          <p>{message.content}</p>
+        )}
+        {message.isIncomplete ? (
+          <p className="incomplete-message" role="status">
+            Response interrupted before it was saved.
+          </p>
+        ) : null}
         {message.role === 'assistant' ? <KnowledgeSources metadata={message.metadata} /> : null}
       </div>
     </article>
