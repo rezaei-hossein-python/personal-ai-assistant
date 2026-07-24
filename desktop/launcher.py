@@ -31,7 +31,6 @@ def run_desktop() -> int:
         from desktop.lifecycle import (
             configure_desktop_environment,
             start_backend,
-            stop_backend,
             wait_for_readiness,
         )
 

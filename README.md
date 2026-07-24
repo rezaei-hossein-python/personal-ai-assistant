@@ -2,7 +2,7 @@
 
 ## Overview
 
-Personal AI Assistant is an early-stage personal AI operating system. The current system includes a frozen Backend Core v1 FastAPI API, Frontend v1, Knowledge/RAG v1, Long-Term Memory v1, Conversation History v1, Actions & Tools v1, Phase 11 Deployment and Production Hardening v1, and Phase 12 Windows Desktop Application v1. The backend supports authenticated chat, message history, memory management, document ingestion, RAG, lightweight agent orchestration, deterministic multi-model provider routing, production configuration validation, migrations, health/readiness checks, container builds, CI validation, and a local Windows desktop mode.
+Personal AI Assistant is an early-stage personal AI operating system. The current system includes a frozen Backend Core v1 FastAPI API, Frontend v1, Knowledge/RAG v1, Long-Term Memory v1, Conversation History v1, Actions & Tools v1, Phase 11 Deployment and Production Hardening v1, Phase 12 Windows Desktop Application v1, and Phase 15 Offline Instant Writing Reviser v1. The backend supports authenticated chat, message history, memory management, document ingestion, RAG, lightweight agent orchestration, deterministic multi-model provider routing, production configuration validation, migrations, health/readiness checks, container builds, CI validation, a local Windows desktop mode, and a Windows-wide offline writing hotkey.
 
 ## Current Architecture
 
@@ -47,6 +47,7 @@ Services
   Retrieval/RAG prompt context
   Conversation/message persistence
   Memory and document CRUD
+  Offline writing revision service isolated from cloud chat providers
 
 Database
   PostgreSQL + pgvector for development/cloud semantic search
@@ -184,6 +185,38 @@ Desktop mode uses `pywebview`, starts FastAPI automatically on `127.0.0.1` with 
 OpenAI remains the default AI provider. Internet access is still required for OpenAI API requests, and usage may cost money. The OpenAI API key is stored through Windows Credential Manager via Python `keyring`; it is not embedded in frontend JavaScript or packaged resources.
 
 See [Desktop Application Guide](docs/desktop-application.md) for architecture, packaging, backup, troubleshooting, limitations, and the manual regression checklist.
+
+## Offline Instant Writing Reviser v1
+
+The offline writing reviser is packaged as a separate silent Windows background executable. Select editable English text in another application, press `Ctrl+Alt+W`, and the selected text is replaced with polished natural English when the local model succeeds. Successful revision displays no chat, no feedback, no score, and no confirmation dialog.
+
+This path is isolated from chat and cloud model routing. It uses the local `ollama` executable with the configured local model, defaults to `llama3.2:3b`, and never falls back to OpenAI or another remote provider. Install Ollama and the model explicitly before use:
+
+```cmd
+winget install Ollama.Ollama
+ollama pull llama3.2:3b
+```
+
+Build the background reviser:
+
+```cmd
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\build_writing_reviser.ps1
+```
+
+Output:
+
+```text
+dist\PersonalAIWritingReviser\PersonalAIWritingReviser.exe
+```
+
+Optional per-user Windows startup is explicit:
+
+```cmd
+dist\PersonalAIWritingReviser\PersonalAIWritingReviser.exe --enable-startup
+dist\PersonalAIWritingReviser\PersonalAIWritingReviser.exe --disable-startup
+```
+
+See [Offline Instant Writing Reviser](docs/offline-writing-reviser.md) for architecture, privacy guarantees, configuration, troubleshooting, and the mandatory offline manual validation checklist.
 
 ## Model Providers
 

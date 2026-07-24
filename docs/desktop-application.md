@@ -24,6 +24,7 @@ Desktop adapters added:
 - Desktop SQLite initialization with a schema-version table.
 - FastAPI static serving for `frontend/dist`.
 - Desktop settings/onboarding UI for OpenAI API key status and replacement.
+- Separate offline writing hotkey runtime for Ctrl+Alt+W local text revision.
 - PyInstaller spec and build script.
 
 PostgreSQL dependencies retained:
@@ -70,9 +71,10 @@ Browser/cloud mode:
 - WebView2 runtime available on Windows.
 - Internet access for OpenAI API calls.
 - OpenAI API key for chat and embeddings.
+- Optional Ollama installation plus `llama3.2:3b` for offline writing revision.
 - Recommended current laptop target: 8 GB RAM, 13th-generation Intel Core i5, no dedicated GPU required.
 
-Desktop v1 does not include a local language model and is not fully offline.
+Desktop chat remains cloud-capable and requires internet for OpenAI. The Ctrl+Alt+W writing reviser is a separate offline-only path after Ollama and the configured local model are installed.
 
 ## Development Prerequisites
 
@@ -172,6 +174,36 @@ Assistant Markdown rendering and persisted `response_metadata` history use the s
 .\.conda\python.exe -m desktop.main
 ```
 
+## Offline Writing Reviser
+
+Offline writing revision is packaged as a separate background executable so the main desktop UI does not need to be open. The reviser captures the current selection, calls a configured local Ollama model through the `ollama` executable, and pastes only the revised text back into the selection. Successful operations are silent and do not open the main assistant window.
+
+Build:
+
+```cmd
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\build_writing_reviser.ps1
+```
+
+Output:
+
+```text
+dist\PersonalAIWritingReviser\PersonalAIWritingReviser.exe
+```
+
+Enable explicit per-user Windows startup:
+
+```cmd
+dist\PersonalAIWritingReviser\PersonalAIWritingReviser.exe --enable-startup
+```
+
+Disable startup:
+
+```cmd
+dist\PersonalAIWritingReviser\PersonalAIWritingReviser.exe --disable-startup
+```
+
+This subsystem is isolated from chat, `ModelRouter`, cloud providers, embeddings, RAG, FastAPI, pywebview, and memory. If the local runtime or model is unavailable, it fails locally and leaves the original text unchanged. See `docs/offline-writing-reviser.md` for installation, configuration, privacy guarantees, and manual validation.
+
 ## Accessibility Notes
 
 Desktop UI accessibility follows the same React implementation as browser mode. Phase 13 adds semantic landmarks, a Skip to conversation link, strong visible focus indicators, explicit labels and error associations, polite status announcements, keyboard focus restoration, clearer destructive-action confirmations, AA-oriented contrast fixes, responsive reflow improvements, and reduced-motion CSS.
@@ -238,7 +270,7 @@ Delete the portable build folder. This does not remove user data. To remove loca
 
 ## Privacy Model
 
-Desktop data remains on the local Windows user profile except OpenAI API requests, which send prompts, retrieved context, and embeddings input to OpenAI. OpenAI usage may cost money. Desktop v1 is local-first, not fully offline.
+Desktop data remains on the local Windows user profile except cloud chat and embedding requests, which send prompts, retrieved context, and embeddings input to configured remote providers. OpenAI usage may cost money. The Ctrl+Alt+W offline writing path is isolated from those providers and sends selected text only to the configured local runtime.
 
 ## Network Behavior
 
@@ -246,10 +278,10 @@ Desktop backend binds only to `127.0.0.1` on an automatically selected port. It 
 
 ## Known Limitations
 
-- OpenAI still requires internet access.
+- OpenAI chat and embeddings still require internet access.
 - OpenAI API usage may cost money.
 - Desktop v1 is Windows-focused.
-- Local AI models such as Ollama are not included.
+- Ollama and local writing models are not bundled or downloaded automatically.
 - SQLite vector search is personal-scale.
 - Original uploaded files are not retained by the current ingestion design; metadata, chunks, and embeddings are stored.
 - No email, calendar, Word, cloud-drive, or external app integrations are included.

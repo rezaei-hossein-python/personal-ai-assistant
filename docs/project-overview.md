@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Personal AI Assistant is being developed into a modular personal AI operating system. The current project includes a frozen Backend Core v1 API, Knowledge/RAG v1, Long-Term Memory v1, a React frontend for authenticated chat with document-backed retrieval and manually saved memories, and Windows Desktop Application v1. The backend includes authenticated chat, user-owned memory and documents, RAG, lightweight agent orchestration, deterministic multi-model provider routing, and a local desktop mode that does not require a public server.
+Personal AI Assistant is being developed into a modular personal AI operating system. The current project includes a frozen Backend Core v1 API, Knowledge/RAG v1, Long-Term Memory v1, a React frontend for authenticated chat with document-backed retrieval and manually saved memories, Windows Desktop Application v1, and Offline Instant Writing Reviser v1. The backend includes authenticated chat, user-owned memory and documents, RAG, lightweight agent orchestration, deterministic multi-model provider routing, a local desktop mode that does not require a public server, and a separate Windows-wide offline writing hotkey process.
 
 Backend Core v1 remains frozen. The frontend integrates with its existing API contracts and does not require incompatible backend application changes.
 
@@ -24,7 +24,7 @@ The desktop launcher resolves `%LOCALAPPDATA%\PersonalAIAssistant`, loads settin
 
 Desktop mode defaults to SQLite at `%LOCALAPPDATA%\PersonalAIAssistant\database\assistant.sqlite3`. PostgreSQL and pgvector remain the default server/cloud path. SQLite stores document embeddings as JSON and uses Python cosine retrieval for personal-scale knowledge search.
 
-OpenAI remains the default AI provider. Desktop v1 still requires internet access for OpenAI API requests and does not include local AI models. The OpenAI API key is stored through Windows Credential Manager via Python `keyring`.
+OpenAI remains the default chat provider. Desktop chat still requires internet access for OpenAI API requests. Phase 15 adds a separate packaged offline writing revision process using the local Ollama CLI and a configured local model; that path does not call chat providers, embeddings, RAG, memory, FastAPI, pywebview, or `ModelRouter`. The OpenAI API key is stored through Windows Credential Manager via Python `keyring`.
 
 Build command:
 
@@ -33,6 +33,14 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\build_desktop.
 ```
 
 Detailed architecture, backup, limitations, and manual test checklist live in `docs/desktop-application.md`.
+
+Offline writing architecture, local model installation, privacy guarantees, and manual validation live in `docs/offline-writing-reviser.md`.
+
+Offline writing build command:
+
+```cmd
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\build_writing_reviser.ps1
+```
 
 ## Current Backend
 
@@ -44,6 +52,7 @@ Detailed architecture, backup, limitations, and manual test checklist live in `d
 - pgvector-backed semantic document search
 - Chat orchestrator coordinating lightweight planner, memory, knowledge, action, and evaluator agents
 - Provider-neutral model interface and router
+- Offline writing provider abstraction independent of cloud model routing
 - OpenAI, Gemini, Claude, and Grok generation providers
 - JWT bearer-token authentication
 - User-owned conversations, memories, and documents

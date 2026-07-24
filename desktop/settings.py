@@ -13,6 +13,13 @@ class DesktopSettings:
     window_min_width: int = 960
     window_min_height: int = 640
     database_backend: str = "sqlite"
+    offline_writing_enabled: bool = True
+    offline_writing_provider: str = "ollama_cli"
+    offline_writing_model: str = "llama3.2:3b"
+    offline_writing_ollama_base_url: str = "http://127.0.0.1:11434"
+    offline_writing_hotkey: str = "Ctrl+Alt+W"
+    offline_writing_timeout_seconds: float = 45.0
+    offline_writing_max_characters: int = 4000
 
 
 def load_desktop_settings(paths: DesktopPaths) -> DesktopSettings:
